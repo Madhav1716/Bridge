@@ -1,0 +1,13 @@
+{
+  "name": "@bridge/agent-mac",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@bridge/shared": "file:../shared"
+  }
+}

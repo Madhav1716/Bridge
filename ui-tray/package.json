@@ -1,0 +1,14 @@
+{
+  "name": "@bridge/ui-tray",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && electron dist/main.js"
+  },
+  "dependencies": {
+    "@bridge/shared": "file:../shared",
+    "electron": "^35.0.0"
+  }
+}

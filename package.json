@@ -1,0 +1,21 @@
+{
+  "name": "bridge",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "agent-windows",
+    "agent-mac",
+    "ui-tray"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace shared && npm run build --workspace agent-windows && npm run build --workspace agent-mac && npm run build --workspace ui-tray",
+    "start:windows": "npm run start --workspace agent-windows",
+    "start:mac": "npm run start --workspace agent-mac",
+    "start:tray": "npm run start --workspace ui-tray"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2"
+  }
+}
