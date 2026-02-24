@@ -191,3 +191,4 @@ npm run start:tray
 - File sync is intentionally not implemented; use SMB/native sharing.
 - Autostart registration is represented by explicit placeholder hooks in both agents.
 # Bridge
+# Bridge
