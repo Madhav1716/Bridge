@@ -31,13 +31,79 @@ function Read-WithDefault {
   return $inputValue.Trim()
 }
 
-function Assert-Admin {
+function Test-IsAdmin {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
   $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-  $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-  if (-not $isAdmin) {
-    throw 'Run setup-windows.ps1 as Administrator.'
+  return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Escape-ArgumentValue {
+  param(
+    [string]$Value
+  )
+
+  return '"' + $Value.Replace('"', '\"') + '"'
+}
+
+function Build-RelaunchArguments {
+  param(
+    [hashtable]$BoundParameters,
+    [string]$ScriptPath
+  )
+
+  $arguments = @(
+    '-NoProfile'
+    '-ExecutionPolicy'
+    'Bypass'
+    '-File'
+    (Escape-ArgumentValue -Value $ScriptPath)
+  )
+
+  foreach ($entry in ($BoundParameters.GetEnumerator() | Sort-Object Key)) {
+    $name = $entry.Key
+    $value = $entry.Value
+
+    if ($value -is [System.Management.Automation.SwitchParameter]) {
+      if ($value.IsPresent) {
+        $arguments += "-$name"
+      }
+      continue
+    }
+
+    if ($value -is [bool]) {
+      if ($value) {
+        $arguments += "-$name:`$true"
+      } else {
+        $arguments += "-$name:`$false"
+      }
+      continue
+    }
+
+    if ($null -eq $value) {
+      continue
+    }
+
+    $arguments += "-$name"
+    $arguments += (Escape-ArgumentValue -Value $value.ToString())
   }
+
+  return $arguments
+}
+
+function Ensure-Admin {
+  if (Test-IsAdmin) {
+    return
+  }
+
+  Write-Host 'Administrator privileges are required. Approve UAC prompt to continue...' -ForegroundColor Yellow
+  $scriptPath = $PSCommandPath
+  $relaunchArgs = Build-RelaunchArguments -BoundParameters $PSBoundParameters -ScriptPath $scriptPath
+  $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $relaunchArgs -Wait -PassThru
+  if ($null -ne $process) {
+    exit $process.ExitCode
+  }
+
+  exit 1
 }
 
 function Assert-ExitCode {
@@ -203,7 +269,7 @@ if (-not $NoPrompt) {
   }
 }
 
-Assert-Admin
+Ensure-Admin
 
 if (-not (Test-Path -Path $WindowsProjectRoot)) {
   throw "Shared root does not exist: $WindowsProjectRoot"
