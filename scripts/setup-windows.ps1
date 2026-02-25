@@ -83,7 +83,7 @@ function Ensure-NtfsAccess {
     [string]$Account
   )
 
-  & icacls $RootPath /grant "$Account:(OI)(CI)M" /T /C > $null
+  & icacls $RootPath /grant "${Account}:(OI)(CI)M" /T /C > $null
   Assert-ExitCode "Setting NTFS permissions for $Account"
 }
 
