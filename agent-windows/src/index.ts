@@ -1,6 +1,8 @@
 import path from 'node:path';
 import {
   BridgeWebSocketServer,
+  CommandCancelRequest,
+  CommandRunRequest,
   createEnvelope,
   DevProcessTracker,
   JsonStore,
@@ -12,6 +14,7 @@ import {
 } from '@bridge/shared';
 import { loadWindowsAgentConfig } from './config';
 import { ensureAutoStartPrepared } from './autostart';
+import { WindowsCommandExecutor } from './commandExecutor';
 
 async function main(): Promise<void> {
   const config = loadWindowsAgentConfig();
@@ -51,6 +54,13 @@ async function main(): Promise<void> {
   const wsServer = new BridgeWebSocketServer(logger);
   wsServer.start(config.wsPort);
 
+  const commandExecutor = new WindowsCommandExecutor(logger, wsServer, {
+    projectPath: config.projectPath,
+    sharedWindowsRoot: config.sharedWindowsRoot,
+    allowedCommands: config.allowedCommands,
+    commandTimeoutMs: config.commandTimeoutMs,
+  });
+
   const clientHeartbeats = new Map<number, number>();
 
   const updateConnectionSnapshot = async (): Promise<void> => {
@@ -77,6 +87,10 @@ async function main(): Promise<void> {
 
   wsServer.on('clientsChanged', (_count) => {
     void updateConnectionSnapshot();
+  });
+
+  wsServer.on('clientDisconnected', (clientId) => {
+    commandExecutor.cancelCommandsForClient(clientId);
   });
 
   wsServer.on('message', (clientId, message) => {
@@ -119,6 +133,19 @@ async function main(): Promise<void> {
         hostName: config.hostName,
         lastHeartbeatAt: new Date().toISOString(),
       });
+      return;
+    }
+
+    if (message.type === 'command:run') {
+      commandExecutor.handleRunRequest(clientId, message.payload as CommandRunRequest);
+      return;
+    }
+
+    if (message.type === 'command:cancel') {
+      commandExecutor.handleCancelRequest(
+        clientId,
+        message.payload as CommandCancelRequest,
+      );
     }
   });
 
@@ -135,6 +162,8 @@ async function main(): Promise<void> {
       platform: 'windows',
       projectName: initialState.projectName,
       hostId: config.hostId,
+      shareName: config.shareName ?? '',
+      windowsRoot: config.sharedWindowsRoot,
     },
   });
 
@@ -198,6 +227,7 @@ async function main(): Promise<void> {
           timeoutMs: config.heartbeatTimeoutMs,
         });
         clientHeartbeats.delete(clientId);
+        commandExecutor.cancelCommandsForClient(clientId);
         wsServer.closeClient(clientId);
       }
     }
@@ -208,6 +238,7 @@ async function main(): Promise<void> {
   const shutdown = async (): Promise<void> => {
     clearInterval(processInterval);
     clearInterval(heartbeatInterval);
+    commandExecutor.stopAll();
     await fileWatcher.stop();
     publisher.stop();
     wsServer.stop();

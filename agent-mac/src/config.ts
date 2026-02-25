@@ -10,6 +10,10 @@ export interface MacAgentConfig {
   heartbeatTimeoutMs: number;
   discoveryStaleMs: number;
   discoverySweepMs: number;
+  smbMountRoot?: string;
+  smbMountTimeoutMs: number;
+  windowsCommand: string;
+  windowsCommandCwd?: string;
   pathMapping?: PathMappingOptions;
 }
 
@@ -51,6 +55,10 @@ export function loadMacAgentConfig(): MacAgentConfig {
     heartbeatTimeoutMs: toNumber(process.env.BRIDGE_HEARTBEAT_TIMEOUT_MS, 12000),
     discoveryStaleMs: toNumber(process.env.BRIDGE_DISCOVERY_STALE_MS, 15000),
     discoverySweepMs: toNumber(process.env.BRIDGE_DISCOVERY_SWEEP_MS, 4000),
+    smbMountRoot: process.env.BRIDGE_SMB_MOUNT_ROOT,
+    smbMountTimeoutMs: toNumber(process.env.BRIDGE_SMB_MOUNT_TIMEOUT_MS, 12000),
+    windowsCommand: process.env.BRIDGE_WINDOWS_COMMAND ?? 'npm -v',
+    windowsCommandCwd: process.env.BRIDGE_WINDOWS_COMMAND_CWD,
     pathMapping,
   };
 }

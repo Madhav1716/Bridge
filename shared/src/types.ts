@@ -49,11 +49,58 @@ export interface MessageEnvelope<TType extends string = string, TPayload = unkno
   sentAt: string;
 }
 
+export interface CommandRunRequest {
+  requestId: string;
+  command: string;
+  args: string[];
+  cwd?: string;
+}
+
+export interface CommandCancelRequest {
+  requestId: string;
+}
+
+export interface CommandStartedEvent {
+  requestId: string;
+  command: string;
+  args: string[];
+  cwd: string;
+  startedAt: string;
+}
+
+export interface CommandOutputEvent {
+  requestId: string;
+  stream: 'stdout' | 'stderr';
+  chunk: string;
+  at: string;
+}
+
+export interface CommandCompletedEvent {
+  requestId: string;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+  cancelled: boolean;
+  completedAt: string;
+}
+
+export interface CommandErrorEvent {
+  requestId: string;
+  message: string;
+  at: string;
+}
+
 export type BridgeMessage =
   | MessageEnvelope<'bridge:hello', AgentHello>
   | MessageEnvelope<'bridge:ping', { timestamp: string; hostId?: string }>
   | MessageEnvelope<'bridge:pong', { timestamp: string; hostId?: string }>
-  | MessageEnvelope<'workspace:state', WorkspaceState>;
+  | MessageEnvelope<'workspace:state', WorkspaceState>
+  | MessageEnvelope<'command:run', CommandRunRequest>
+  | MessageEnvelope<'command:cancel', CommandCancelRequest>
+  | MessageEnvelope<'command:started', CommandStartedEvent>
+  | MessageEnvelope<'command:output', CommandOutputEvent>
+  | MessageEnvelope<'command:completed', CommandCompletedEvent>
+  | MessageEnvelope<'command:error', CommandErrorEvent>;
 
 export interface BridgeServiceRecord {
   id: string;
@@ -71,6 +118,11 @@ export interface UiStatusSnapshot {
   activeProject: string | null;
   projectPath: string | null;
   lastEvent: string | null;
+  commandState?: 'idle' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  activeCommand?: string | null;
+  activeCommandRequestId?: string | null;
+  commandExitCode?: number | null;
+  lastCommandAt?: string | null;
 }
 
 export type UiActionType =
@@ -78,7 +130,9 @@ export type UiActionType =
   | 'pause'
   | 'resume'
   | 'open-project'
-  | 'resume-workspace';
+  | 'resume-workspace'
+  | 'run-windows-command'
+  | 'cancel-windows-command';
 
 export type UiBridgeMessage =
   | MessageEnvelope<'ui:status', UiStatusSnapshot>

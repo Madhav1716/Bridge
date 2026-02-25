@@ -13,6 +13,11 @@ let status: UiStatusSnapshot = {
   activeProject: null,
   projectPath: null,
   lastEvent: null,
+  commandState: 'idle',
+  activeCommand: null,
+  activeCommandRequestId: null,
+  commandExitCode: null,
+  lastCommandAt: null,
 };
 
 function createTrayIcon() {
@@ -59,12 +64,39 @@ function getLifecycleLabel(connectionStatus: UiStatusSnapshot['connectionStatus'
   }
 }
 
+function getCommandStatusLabel(snapshot: UiStatusSnapshot): string {
+  const commandState = snapshot.commandState ?? 'idle';
+  const command = snapshot.activeCommand ?? 'No command';
+
+  if (commandState === 'running') {
+    return `Command: Running (${command})`;
+  }
+
+  if (commandState === 'succeeded') {
+    return `Command: Succeeded (${command})`;
+  }
+
+  if (commandState === 'failed') {
+    const exitCode = snapshot.commandExitCode;
+    return exitCode === null || exitCode === undefined
+      ? `Command: Failed (${command})`
+      : `Command: Failed (${command}, exit ${exitCode})`;
+  }
+
+  if (commandState === 'cancelled') {
+    return `Command: Cancelled (${command})`;
+  }
+
+  return 'Command: Idle';
+}
+
 function buildMenu(): Electron.Menu {
   const lifecycle = getLifecycleLabel(status.connectionStatus);
   const pauseAction =
     status.connectionStatus === 'PAUSED'
       ? { label: 'Resume', action: 'resume' as const }
       : { label: 'Pause', action: 'pause' as const };
+  const commandRunning = status.commandState === 'running';
 
   return Menu.buildFromTemplate([
     {
@@ -81,6 +113,10 @@ function buildMenu(): Electron.Menu {
     },
     {
       label: `Last Update: ${formatLastUpdate(status.lastEvent)}`,
+      enabled: false,
+    },
+    {
+      label: getCommandStatusLabel(status),
       enabled: false,
     },
     {
@@ -108,6 +144,20 @@ function buildMenu(): Electron.Menu {
       label: pauseAction.label,
       click: () => {
         uiClient.sendAction(pauseAction.action);
+      },
+    },
+    {
+      label: 'Run Windows Command',
+      enabled: status.connectionStatus === 'CONNECTED' && !commandRunning,
+      click: () => {
+        uiClient.sendAction('run-windows-command');
+      },
+    },
+    {
+      label: 'Cancel Windows Command',
+      enabled: commandRunning,
+      click: () => {
+        uiClient.sendAction('cancel-windows-command');
       },
     },
     {

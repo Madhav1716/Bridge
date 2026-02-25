@@ -1,6 +1,10 @@
 import {
   BridgeServiceRecord,
   BridgeWebSocketClient,
+  CommandCompletedEvent,
+  CommandErrorEvent,
+  CommandOutputEvent,
+  CommandStartedEvent,
   HostSelection,
   JsonStore,
   Logger,
@@ -13,7 +17,55 @@ import {
 } from '@bridge/shared';
 import { loadMacAgentConfig } from './config';
 import { ensureAutoStartPrepared } from './autostart';
-import { openProjectFolder, resumeWorkspace } from './resumeWorkspace';
+import { createCommandRunRequest } from './commandRequest';
+import {
+  openProjectFolder,
+  resumeWorkspace,
+  ResumeAccessOptions,
+} from './resumeWorkspace';
+
+function deriveAutoMapping(
+  service: BridgeServiceRecord | null,
+): { windowsRoot: string; smbRoot: string } | undefined {
+  if (!service) {
+    return undefined;
+  }
+
+  const shareName = service.txt.shareName?.trim();
+  const windowsRoot = service.txt.windowsRoot?.trim();
+  if (!shareName || !windowsRoot) {
+    return undefined;
+  }
+
+  const encodedShareName = encodeURIComponent(shareName);
+  const smbRoot = `smb://${service.host}/${encodedShareName}`;
+
+  return {
+    windowsRoot,
+    smbRoot,
+  };
+}
+
+function deriveAutoMountRoot(service: BridgeServiceRecord | null): string | undefined {
+  if (!service) {
+    return undefined;
+  }
+
+  const shareName = service.txt.shareName?.trim();
+  if (!shareName) {
+    return undefined;
+  }
+
+  return `/Volumes/${shareName}`;
+}
+
+function buildCommandLine(command: string, args: string[]): string {
+  if (args.length === 0) {
+    return command;
+  }
+
+  return `${command} ${args.join(' ')}`;
+}
 
 async function main(): Promise<void> {
   const config = loadMacAgentConfig();
@@ -53,6 +105,11 @@ async function main(): Promise<void> {
     activeProject: null,
     projectPath: null,
     lastEvent: null,
+    commandState: 'idle',
+    activeCommand: null,
+    activeCommandRequestId: null,
+    commandExitCode: null,
+    lastCommandAt: null,
   });
   uiBridge.start(config.uiBridgePort);
 
@@ -84,6 +141,7 @@ async function main(): Promise<void> {
   let selectedService: BridgeServiceRecord | null = null;
   let lastServerHeartbeatAt = 0;
   let heartbeatReconnectIssued = false;
+  let activeCommandRequestId: string | null = null;
 
   const connectToSelectedService = async (): Promise<void> => {
     const preferred = hostSelection.selectPreferred(selectedService?.identity);
@@ -215,6 +273,15 @@ async function main(): Promise<void> {
     }
 
     void stateManager.updateConnectionState(connectionPatch);
+
+    if (status !== 'CONNECTED' && activeCommandRequestId) {
+      uiBridge.updateStatus({
+        commandState: 'failed',
+        activeCommandRequestId: null,
+        lastCommandAt: new Date().toISOString(),
+      });
+      activeCommandRequestId = null;
+    }
   });
 
   wsClient.on('message', (message) => {
@@ -272,19 +339,193 @@ async function main(): Promise<void> {
         hostName: selectedService?.name ?? null,
         lastHeartbeatAt: new Date().toISOString(),
       });
+      return;
+    }
+
+    if (message.type === 'command:started') {
+      const started = message.payload as CommandStartedEvent;
+      activeCommandRequestId = started.requestId;
+
+      uiBridge.updateStatus({
+        commandState: 'running',
+        activeCommand: buildCommandLine(started.command, started.args),
+        activeCommandRequestId: started.requestId,
+        commandExitCode: null,
+        lastCommandAt: started.startedAt,
+      });
+
+      logger.event(
+        {
+          component: 'remote-command',
+          event: 'started',
+          state: stateManager.getState().connection.lifecycle,
+          hostId: selectedService?.identity ?? undefined,
+        },
+        {
+          requestId: started.requestId,
+          command: started.command,
+          args: started.args,
+          cwd: started.cwd,
+        },
+      );
+      return;
+    }
+
+    if (message.type === 'command:output') {
+      const output = message.payload as CommandOutputEvent;
+      const trimmedChunk = output.chunk.trim();
+
+      if (trimmedChunk.length > 0) {
+        logger.info('Remote command output', {
+          requestId: output.requestId,
+          stream: output.stream,
+          chunk: trimmedChunk.slice(0, 500),
+        });
+      }
+      return;
+    }
+
+    if (message.type === 'command:completed') {
+      const completed = message.payload as CommandCompletedEvent;
+      const commandState = completed.cancelled
+        ? 'cancelled'
+        : completed.exitCode === 0 && !completed.timedOut
+          ? 'succeeded'
+          : 'failed';
+
+      uiBridge.updateStatus({
+        commandState,
+        activeCommandRequestId: null,
+        commandExitCode: completed.exitCode,
+        lastCommandAt: completed.completedAt,
+      });
+
+      if (activeCommandRequestId === completed.requestId) {
+        activeCommandRequestId = null;
+      }
+
+      logger.event(
+        {
+          component: 'remote-command',
+          event: 'completed',
+          state: stateManager.getState().connection.lifecycle,
+          hostId: selectedService?.identity ?? undefined,
+        },
+        {
+          requestId: completed.requestId,
+          exitCode: completed.exitCode,
+          signal: completed.signal,
+          cancelled: completed.cancelled,
+          timedOut: completed.timedOut,
+        },
+      );
+      return;
+    }
+
+    if (message.type === 'command:error') {
+      const error = message.payload as CommandErrorEvent;
+
+      uiBridge.updateStatus({
+        commandState: 'failed',
+        activeCommandRequestId: null,
+        commandExitCode: null,
+        lastCommandAt: error.at,
+      });
+
+      if (activeCommandRequestId === error.requestId) {
+        activeCommandRequestId = null;
+      }
+
+      logger.warn('Remote command failed', {
+        requestId: error.requestId,
+        error: error.message,
+      });
     }
   });
 
   uiBridge.on('action', (action: UiActionType) => {
-    void handleUiAction(
-      logger,
-      action,
-      wsClient,
-      stateManager,
-      () => selectedService,
-      connectToSelectedService,
-      config.pathMapping,
-    );
+    void (async () => {
+      try {
+        const dynamicMapping =
+          config.pathMapping ?? deriveAutoMapping(selectedService);
+        const dynamicMountRoot =
+          config.smbMountRoot ?? deriveAutoMountRoot(selectedService);
+
+        if (action === 'run-windows-command') {
+          if (wsClient.getStatus() !== 'CONNECTED') {
+            logger.warn('Cannot run Windows command while disconnected');
+            return;
+          }
+
+          if (activeCommandRequestId) {
+            logger.warn('A Windows command is already running', {
+              requestId: activeCommandRequestId,
+            });
+            return;
+          }
+
+          const requestId = `cmd-${Date.now()}-${Math.random()
+            .toString(16)
+            .slice(2, 8)}`;
+          const request = createCommandRunRequest(
+            config.windowsCommand,
+            requestId,
+            config.windowsCommandCwd,
+          );
+
+          if (!request) {
+            logger.warn('BRIDGE_WINDOWS_COMMAND is empty; command run ignored');
+            return;
+          }
+
+          activeCommandRequestId = requestId;
+          uiBridge.updateStatus({
+            commandState: 'running',
+            activeCommand: config.windowsCommand,
+            activeCommandRequestId: requestId,
+            commandExitCode: null,
+            lastCommandAt: new Date().toISOString(),
+          });
+
+          wsClient.send(createEnvelope('command:run', request));
+          return;
+        }
+
+        if (action === 'cancel-windows-command') {
+          if (!activeCommandRequestId) {
+            logger.warn('No running Windows command to cancel');
+            return;
+          }
+
+          wsClient.send(
+            createEnvelope('command:cancel', {
+              requestId: activeCommandRequestId,
+            }),
+          );
+          return;
+        }
+
+        await handleUiAction(
+          logger,
+          action,
+          wsClient,
+          stateManager,
+          () => selectedService,
+          connectToSelectedService,
+          {
+            mapping: dynamicMapping,
+            smbMountRoot: dynamicMountRoot,
+            mountTimeoutMs: config.smbMountTimeoutMs,
+          },
+        );
+      } catch (error) {
+        const typed = error as Error;
+        logger.error('UI action failed', {
+          action,
+          error: typed.message,
+        });
+      }
+    })();
   });
 
   const pingInterval = setInterval(() => {
@@ -378,7 +619,7 @@ async function handleUiAction(
   stateManager: WorkspaceStateManager,
   getSelectedService: () => BridgeServiceRecord | null,
   connectToSelectedService: () => Promise<void>,
-  pathMapping: { windowsRoot: string; smbRoot: string } | undefined,
+  resumeAccessOptions: ResumeAccessOptions,
 ): Promise<void> {
   const selectedService = getSelectedService();
 
@@ -419,12 +660,12 @@ async function handleUiAction(
   const workspaceState = hasWorkspace ? stateSnapshot : null;
 
   if (action === 'open-project') {
-    await openProjectFolder(logger, workspaceState, pathMapping);
+    await openProjectFolder(logger, workspaceState, resumeAccessOptions);
     return;
   }
 
   if (action === 'resume-workspace') {
-    await resumeWorkspace(logger, workspaceState, pathMapping);
+    await resumeWorkspace(logger, workspaceState, resumeAccessOptions);
   }
 }
 
