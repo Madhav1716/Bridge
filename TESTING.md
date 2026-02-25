@@ -1,213 +1,205 @@
-# Bridge Test Runbook
+# How to Test Bridge
 
-This file is a quick, repeatable guide to test Bridge end-to-end.
+Follow these steps in order. Each section tells you what to do and what you should see.
 
-## 1) One-time setup
+---
 
-### Mac: install and build
-```bash
-cd /Users/maddy/Development/Bridge
-npm install
-npm run build
-```
+## Before you start
 
-### Windows: shared folder requirements
-1. Share the project root folder (example: `D:\Bridge\Bridge`) as `BridgeShare`.
-2. Ensure Mac can open `smb://<WINDOWS_IP>/BridgeShare`.
-3. Ensure Windows firewall allows File and Printer Sharing.
+- **Need:** Node.js 20+, two machines (one Windows, one Mac) on the **same Wi‑Fi/LAN**, or one machine for single-side tests.
+- **Build once:**
+  ```bash
+  cd /path/to/Bridge
+  npm install
+  npm run build
+  ```
 
-### One-command setup (recommended)
+---
 
-Mac:
-```bash
-cd /Users/maddy/Development/Bridge
-npm run setup:mac
-```
+## Test 1: Mac only (no Windows)
 
-Mac quick setup (no prompts):
-```bash
-cd /Users/maddy/Development/Bridge
-BRIDGE_WINDOWS_HOST=192.168.29.65 npm run setup:mac:quick
-```
+**Steps:**
 
-Windows (Administrator PowerShell):
+1. On your Mac, open Terminal and go to the Bridge folder.
+2. Run:
+   ```bash
+   npm run start:mac:all
+   ```
+
+**You should get:**
+
+- A **Bridge icon** in the **menu bar** (top right).
+- Click the icon → menu shows:
+  - **Discovering** or **Disconnected**
+  - Host: Not connected
+  - Project: No project
+  - Last Update: N/A
+  - Actions: Resume Workspace, Open Project Folder, Pause, Reconnect, Quit Bridge
+
+**Stop:** Click **Quit Bridge** in the menu.
+
+---
+
+## Test 2: Windows only
+
+**Steps:**
+
+1. On Windows, open PowerShell or Command Prompt and go to the Bridge folder.
+2. *(First time only)* Run setup as **Administrator** (right‑click PowerShell → Run as administrator):
+   ```powershell
+   npm run setup:windows
+   ```
+   When asked for the folder to share, press **Enter** (use current folder) or type a path like `D:\MyProject`.
+3. Start Bridge with tray:
+   ```powershell
+   npm run start:windows:all
+   ```
+
+**You should get:**
+
+- A **Bridge icon** in the **system tray** (bottom right, near the clock).
+- Click the icon → menu shows:
+  - **Status: Hosting** (green)
+  - Project: *(your project folder name)*
+  - Mac Connected: No
+  - **Pause Bridge** | **Restart Host** | **Open Project Folder** | **Quit Bridge**
+
+**Try:**
+
+- **Pause Bridge** → status changes to **Paused**.
+- **Resume Bridge** → status goes back to **Hosting**.
+- **Open Project Folder** → Windows Explorer opens your project folder.
+- **Restart Host** → Bridge process restarts (tray may close and you can run `npm run start:windows:all` again).
+- **Quit Bridge** → tray and agent exit.
+
+**Note:** Windows setup enables Remote Desktop (RDP) when possible so the Mac can access the **entire Windows PC** via the Mac tray’s **Access Windows** (no folder share needed for full access). Windows Home cannot host RDP; use Pro/Enterprise for that.
+
+---
+
+## Test 3: Full flow (Windows + Mac on same LAN)
+
+Do this when both machines are on the same network (e.g. same Wi‑Fi).
+
+### One-time setup
+
+**On Windows (as Administrator):**
+
 ```powershell
-cd D:\Bridge\Bridge
+cd D:\path\to\Bridge
 npm run setup:windows
 ```
 
-Windows quick setup (Administrator, no prompts):
+- When asked for the folder to share, press Enter or type your project path.
+- You should see: “Setup complete” and “Share ready”.
+
+**On Mac:**
+
+```bash
+cd /path/to/Bridge
+npm run setup:mac
+```
+
+- When asked for “Windows PC IP address”, press **Enter** to use auto‑discovery (recommended).  
+  If your Mac never finds the PC later, run this again and enter the Windows PC’s IP (e.g. `192.168.1.10`).
+
+### Run both sides
+
+**Step 1 – Start Windows**
+
+On Windows:
+
 ```powershell
-cd D:\Bridge\Bridge
-npm run setup:windows:quick
+npm run start:windows:all
 ```
 
-For simplest onboarding, pick `everyone` when setup asks for permission mode.
+**You should get:** Tray icon; menu shows **Hosting**, your project name, Mac Connected: No.
 
-### One-time config files (recommended)
+---
 
-This avoids repeated `export`/`set` commands every run.
+**Step 2 – Start Mac**
 
-Mac:
-```bash
-cd /Users/maddy/Development/Bridge
-cp bridge.mac.example.json bridge.mac.json
-```
-Edit `bridge.mac.json` once with your real IP/share/path.
+On Mac:
 
-Windows:
-```bat
-cd D:\Bridge\Bridge
-copy bridge.windows.example.json bridge.windows.json
-```
-Edit `bridge.windows.json` once with your real paths.
-
-After that, start commands are simple:
-- Windows: `npm run start:windows`
-- Mac (agent + tray): `npm run start:mac:all`
-
-## 2) Quick sync from Mac -> Windows (repeatable)
-
-Use this on Mac to copy latest code to Windows mounted share:
-
-```bash
-rsync -av --delete \
-  --exclude '.git' \
-  --exclude 'node_modules' \
-  --exclude 'dist' \
-  /Users/maddy/Development/Bridge/ \
-  /Volumes/BridgeShare/Bridge/
-```
-
-Optional alias:
-```bash
-alias syncbridge="rsync -av --delete --exclude '.git' --exclude 'node_modules' --exclude 'dist' /Users/maddy/Development/Bridge/ /Volumes/BridgeShare/Bridge/"
-```
-
-Then run:
-```bash
-syncbridge
-```
-
-## 3) Start Windows agent
-
-Run on Windows in project copy:
-
-```bat
-cd D:\Bridge\Bridge
-set BRIDGE_PROJECT_PATH=D:\Bridge\Bridge\agent-windows
-set BRIDGE_WINDOWS_PROJECT_ROOT=D:\Bridge\Bridge
-set BRIDGE_SHARE_NAME=BridgeShare
-set BRIDGE_HOST_ID=ASUS
-set BRIDGE_HOST_NAME=Asus
-set BRIDGE_DISCOVERY_TYPE=bridgeworkspace
-set BRIDGE_ALLOWED_COMMANDS=npm,pnpm,yarn,node,npx,git,python,pytest,dotnet,cargo,go
-set BRIDGE_COMMAND_TIMEOUT_MS=900000
-npm run start:windows
-```
-
-If `bridge.windows.json` exists, you can skip all `set` lines and run only:
-```bat
-npm run start:windows
-```
-
-## 4) Start Mac agent
-
-Run on Mac:
-
-```bash
-cd /Users/maddy/Development/Bridge
-export BRIDGE_DISCOVERY_TYPE=bridgeworkspace
-export BRIDGE_WINDOWS_COMMAND='npm -v'
-export BRIDGE_WINDOWS_COMMAND_CWD='D:/Bridge/Bridge/agent-windows'
-npm run start:mac
-```
-
-If `bridge.mac.json` exists, you can skip all `export` lines and run only:
 ```bash
 npm run start:mac:all
 ```
 
-If auto-mapping is not available, set manual mapping:
-```bash
-export BRIDGE_WINDOWS_PROJECT_ROOT='D:/Bridge/Bridge'
-export BRIDGE_SMB_ROOT='smb://<WINDOWS_IP>/BridgeShare'
-export BRIDGE_SMB_MOUNT_ROOT='/Volumes/BridgeShare'
-```
+**You should get (within a few seconds):**
 
-## 5) Start tray UI (Mac)
+- Tray icon in the menu bar.
+- Menu shows:
+  - **Connected**
+  - Host: *(your Windows PC name)*
+  - Project: *(same project name as on Windows)*
+  - Last Update: *(time)*
 
-Skip this step if you used `npm run start:mac:all`.
+**On Windows tray you should get:** Mac Connected: **Yes (1)** and status **Connected**.
 
-```bash
-cd /Users/maddy/Development/Bridge
-npm run start:tray
-```
+---
 
-## 6) Test checklist (pass/fail)
+**Step 3 – Access entire Windows (Mac) — no folder share needed**
 
-### A) Connection lifecycle
-1. Tray reaches `🟢 Connected`.
-2. Host + project are shown.
+On the **Mac** tray menu, click **Access Windows**.
 
-### A1) Pair once, remember forever
-1. In tray, pick a host from discovered hosts list.
-2. Confirm `Paired Host` updates.
-3. Restart Mac agent/tray.
-4. Confirm Bridge reconnects to that paired host automatically.
+**You should get:** A Remote Desktop session opens (Windows App or Microsoft Remote Desktop). You see the **full Windows desktop** and can use the whole PC from your Mac. Log in with your Windows user if prompted. No folder sharing required.
 
-### B) Workspace continuity
-1. Click `Open Project Folder` -> shared folder opens on Mac.
-2. Click `Resume Workspace` -> folder + recent files open.
+*(Requires Windows Pro/Enterprise for RDP hosting. If you see an error, your Windows edition may not support it.)*
 
-### C) Heartbeat/reconnect
-1. Stop Windows agent.
-2. Tray shows reconnect/discovering state.
-3. Start Windows agent again.
-4. Tray returns to `🟢 Connected`.
+---
 
-### D) Windows command execution from Mac
-1. Click `Run Windows Command`.
-2. Command state changes to `Running`, then `Succeeded` (or `Failed` with exit).
-3. Click `Cancel Windows Command` during a long command and confirm `Cancelled`.
+**Step 4 – Resume Workspace / Open Project (Mac) — optional**
 
-### E) Full Windows control from Mac
-1. Click `Control Windows (Remote)` in tray.
-2. Confirm RDP client opens and connects to Windows host.
-3. Verify you can control Windows desktop (keyboard + mouse) from Mac.
+If you also use a shared folder:
 
-## 7) Fast retest loop
+- **Open Project Folder**  
+  **You should get:** macOS may ask once to connect to the Windows share (SMB). After you approve, **Finder** opens the shared project folder.
+- Or click **Resume Workspace**  
+  **You should get:** Same SMB prompt if first time, then Finder opens the project folder and can open recent files.
 
-1. Edit code on Mac.
-2. `syncbridge` (or rsync command).
-3. Restart Windows + Mac agents.
-4. Re-run tray checks from section 6.
+---
 
-## 8) Troubleshooting
+**Step 5 – Pause / Resume (Mac)**
 
-### SMB login keeps failing
-1. Use Windows account credentials (not Mac password, not Windows PIN).
-2. Try username format: `ASUS\\username`.
-3. Use IP-based SMB URL: `smb://<WINDOWS_IP>/BridgeShare`.
+On the **Mac** tray:
 
-### Stuck in Discovering
-1. Confirm both devices are on same LAN.
-2. Confirm both use `BRIDGE_DISCOVERY_TYPE=bridgeworkspace`.
-3. Confirm Windows agent is running and firewall allows Node/File sharing.
-4. Set direct host fallback and restart Mac agent:
-```bash
-BRIDGE_WINDOWS_HOST=<WINDOWS_IP> npm run setup:mac:quick
-npm run start:mac:all
-```
-5. Pair the host once from tray device list so Bridge remembers it.
+- Click **Pause**.  
+  **You should get:** Status changes to **Paused**; on Windows tray, Mac Connected goes back to **No**.
+- Click **Resume**.  
+  **You should get:** Status goes back to **Connected**; Windows tray shows Mac Connected: Yes again.
 
-### Resume says mapping required
-Set either:
-1. Windows share metadata (`BRIDGE_SHARE_NAME` + `BRIDGE_WINDOWS_PROJECT_ROOT`) on host, or
-2. Manual Mac mapping (`BRIDGE_WINDOWS_PROJECT_ROOT` + `BRIDGE_SMB_ROOT`).
+---
 
-### Remote control action fails
-1. Install `Windows App` or `Microsoft Remote Desktop` on Mac.
-2. Re-run Windows setup so Remote Desktop + firewall are enabled: `npm run setup:windows`.
-3. Confirm Windows is reachable on RDP port `3389` in the same LAN.
-4. Confirm Windows host edition supports RDP server (Pro/Enterprise).
+**Step 6 – Pause / Resume (Windows)**
+
+On the **Windows** tray:
+
+- Click **Pause Bridge**.  
+  **You should get:** Windows status → **Paused**; on the **Mac** tray, status goes to **Disconnected** (or Reconnecting).
+- On Windows, click **Resume Bridge**.  
+  **You should get:** Windows → **Hosting**; Mac reconnects and shows **Connected** again.
+
+---
+
+## Quick reference: what you get
+
+| Where        | What you get |
+|-------------|----------------|
+| **Mac tray** | Status (Discovering / Connected / Paused / Disconnected), Host name, Project name, Last update. Actions: Resume Workspace, Open Project Folder, **Access Windows** (full PC via RDP), Pause/Resume, Reconnect, Quit. |
+| **Windows tray** | Status (Hosting / Connected / Paused), Project name, Mac Connected (Yes/No). Actions: Pause/Resume Bridge, Restart Host, Open Project Folder, Quit. |
+| **Same icons** | Green = Connected/Hosting, Yellow = Reconnecting, Pause = Paused, Red = Disconnected. |
+
+---
+
+## If something doesn’t work
+
+- **Mac never shows “Connected”**  
+  - Same Wi‑Fi/LAN as Windows.  
+  - Firewall on Windows allows port **47831** and mDNS.  
+  - If mDNS is blocked, run `npm run setup:mac` again and enter the Windows PC’s IP (find it with `ipconfig` on Windows).
+
+- **“Open Project Folder” or “Resume Workspace” doesn’t open the folder**  
+  - Approve the macOS SMB connection prompt.  
+  - On Windows, ensure the shared folder path from setup is correct and the share is still there.
+
+- **Build errors**  
+  - Run `npm install` and `npm run build` again from the Bridge root folder.

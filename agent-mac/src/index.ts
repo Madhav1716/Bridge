@@ -19,6 +19,7 @@ import {
   resumeWorkspace,
   ResumeAccessOptions,
 } from './resumeWorkspace';
+import { openRemoteControlSession } from './remoteControl';
 import { PairingStore } from './pairingStore';
 
 function deriveAutoMapping(
@@ -409,6 +410,28 @@ async function main(): Promise<void> {
     void (async () => {
       const action = payload.action;
       try {
+        if (action === 'open-remote-control') {
+          const remoteService =
+            selectedService ??
+            (activeTargetHost
+              ? {
+                  id: `direct-${activeTargetHost}`,
+                  identity: activeTargetHost,
+                  name: activeTargetHost,
+                  host: activeTargetHost,
+                  port: config.windowsWsPort,
+                  addresses: [activeTargetHost],
+                  txt: {
+                    remoteControl: '1',
+                    remoteProtocol: 'rdp',
+                    remotePort: '3389',
+                  },
+                }
+              : null);
+          await openRemoteControlSession(logger, remoteService);
+          return;
+        }
+
         const dynamicMapping =
           config.pathMapping ?? deriveAutoMapping(selectedService);
         const dynamicMountRoot =

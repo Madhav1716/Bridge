@@ -2,6 +2,7 @@
 
 Bridge is a LAN-only background system for workspace continuity between a Windows host and a Mac client.
 
+- **Access entire Windows from Mac:** In the Mac tray, use **Access Windows** to open the full Windows desktop (Remote Desktop). No folder sharing required for full PC access. (Windows Pro/Enterprise required for RDP hosting.)
 - Windows Agent hosts workspace state and WebSocket updates.
 - Mac Agent discovers Windows automatically (mDNS), receives state, and can reconstruct workspace context.
 - Tray UI is tiny (tray/menu bar only) and controls reconnect/pause/resume/open actions.

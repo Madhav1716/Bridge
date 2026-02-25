@@ -42,7 +42,21 @@ function Enable-FileSharingFirewall {
   Assert-ExitCode 'Enabling firewall for file sharing'
 }
 
-function Write-WindowsConfig { param([string]$TargetPath, [string]$Project, [string]$WindowsRoot, [string]$Share, [string]$HostName, [string]$HostId)
+function Test-RdpHostSupport {
+  try {
+    $edition = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue).EditionID
+    if ($edition -like 'Core*' -or $edition -eq 'Core') { return $false }
+    return $true
+  } catch { return $true }
+}
+
+function Enable-RemoteDesktop {
+  Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -Force -ErrorAction Stop
+  & netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes > $null
+  Assert-ExitCode 'Enabling Remote Desktop firewall rules'
+}
+
+function Write-WindowsConfig { param([string]$TargetPath, [string]$Project, [string]$WindowsRoot, [string]$Share, [string]$HostName, [string]$HostId, [bool]$RemoteControlEnabled)
   $config = @{
     projectPath = $Project
     windowsProjectRoot = $WindowsRoot
@@ -50,7 +64,7 @@ function Write-WindowsConfig { param([string]$TargetPath, [string]$Project, [str
     hostId = $HostId
     hostName = $HostName
     discoveryType = 'bridgeworkspace'
-    remoteControlEnabled = $false
+    remoteControlEnabled = $RemoteControlEnabled
     remoteProtocol = 'rdp'
     remotePort = 3389
     remoteUsername = ''
@@ -90,6 +104,18 @@ Ensure-Share -Share $ShareName -RootPath $WindowsProjectRoot -Account 'Everyone'
 Ensure-NtfsAccess -RootPath $WindowsProjectRoot -Account 'Everyone'
 Enable-FileSharingFirewall
 
+$rdpEnabled = $false
+if (Test-RdpHostSupport) {
+  try {
+    Enable-RemoteDesktop
+    $rdpEnabled = $true
+  } catch {
+    Write-Host 'Could not enable Remote Desktop (need Pro/Enterprise for full PC access from Mac).' -ForegroundColor Yellow
+  }
+} else {
+  Write-Host 'Windows Home edition: Remote Desktop hosting not available. Use folder share for file access.' -ForegroundColor Yellow
+}
+
 $configPath = Join-Path $repoRoot 'bridge.windows.json'
 Write-WindowsConfig `
   -TargetPath $configPath `
@@ -97,7 +123,8 @@ Write-WindowsConfig `
   -WindowsRoot $WindowsProjectRoot `
   -Share $ShareName `
   -HostName $env:COMPUTERNAME `
-  -HostIdentifier $env:COMPUTERNAME
+  -HostIdentifier $env:COMPUTERNAME `
+  -RemoteControlEnabled $rdpEnabled
 
 $ip = $null
 try {
@@ -109,6 +136,11 @@ Write-Host 'Setup complete.' -ForegroundColor Green
 Write-Host ''
 Write-Host "Shared folder: \\$env:COMPUTERNAME\$ShareName"
 if ($ip) { Write-Host "From Mac: smb://$ip/$ShareName" }
+if ($rdpEnabled) {
+  Write-Host ''
+  Write-Host 'Full PC access: From Mac tray, use "Access Windows" to open the full Windows desktop (RDP).' -ForegroundColor Green
+  if ($ip) { Write-Host "RDP: $ip`:3389" }
+}
 Write-Host ''
 Write-Host 'Start Bridge:  npm run start:windows' -ForegroundColor Cyan
 Write-Host ''

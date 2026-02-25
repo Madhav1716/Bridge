@@ -89,6 +89,11 @@ function buildMacMenu(): Electron.Menu {
     { type: 'separator' },
     { label: 'Resume Workspace', click: () => uiClient.sendAction('resume-workspace') },
     { label: 'Open Project Folder', click: () => uiClient.sendAction('open-project') },
+    {
+      label: 'Access Windows',
+      enabled: status.connectionStatus === 'CONNECTED',
+      click: () => uiClient.sendAction('open-remote-control'),
+    },
     { type: 'separator' },
     {
       label: isPaused ? 'Resume' : 'Pause',
