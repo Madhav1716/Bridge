@@ -41,6 +41,17 @@ export interface AgentHello {
   platform: PlatformKind;
 }
 
+export interface ConnectionRequest {
+  hostId: string;
+  hostName: string;
+}
+
+export interface ConnectionResponse {
+  accepted: boolean;
+  clientId: string;
+  clientName: string;
+}
+
 export type ConnectionStatus = ConnectionLifecycleState;
 
 export interface MessageEnvelope<TType extends string = string, TPayload = unknown> {
@@ -94,6 +105,8 @@ export type BridgeMessage =
   | MessageEnvelope<'bridge:hello', AgentHello>
   | MessageEnvelope<'bridge:ping', { timestamp: string; hostId?: string }>
   | MessageEnvelope<'bridge:pong', { timestamp: string; hostId?: string }>
+  | MessageEnvelope<'bridge:connection-request', ConnectionRequest>
+  | MessageEnvelope<'bridge:connection-response', ConnectionResponse>
   | MessageEnvelope<'workspace:state', WorkspaceState>
   | MessageEnvelope<'command:run', CommandRunRequest>
   | MessageEnvelope<'command:cancel', CommandCancelRequest>
@@ -112,32 +125,23 @@ export interface BridgeServiceRecord {
   txt: Record<string, string>;
 }
 
+export interface UiDiscoveredDevice {
+  id: string;
+  name: string;
+  address: string;
+  connected: boolean;
+  paired: boolean;
+}
+
 export interface UiStatusSnapshot {
   connectionStatus: ConnectionStatus;
   hostDevice: string | null;
   activeProject: string | null;
   projectPath: string | null;
   lastEvent: string | null;
-  commandState?: 'idle' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-  activeCommand?: string | null;
-  activeCommandRequestId?: string | null;
-  commandExitCode?: number | null;
-  lastCommandAt?: string | null;
-  pairedHostId?: string | null;
-  pairedHostName?: string | null;
-  discoveredHosts?: UiDiscoveredHost[];
-  /** When running as Windows host: number of connected Mac clients */
-  macConnected?: number;
-}
-
-export interface UiDiscoveredHost {
-  hostId: string;
-  hostName: string;
-  address: string;
-  lastSeenAt: number;
-  seenCount: number;
-  isPaired: boolean;
-  isConnected: boolean;
+  connectedDevice?: string | null;
+  discoveredDevices?: UiDiscoveredDevice[];
+  pendingConnectionRequest?: { hostName: string; hostId: string } | null;
 }
 
 export type UiActionType =
@@ -146,12 +150,9 @@ export type UiActionType =
   | 'resume'
   | 'open-project'
   | 'resume-workspace'
-  | 'open-remote-control'
-  | 'pair-host'
-  | 'clear-paired-host'
-  | 'run-windows-command'
-  | 'cancel-windows-command'
-  | 'restart-host';
+  | 'connect-device'
+  | 'approve-connection'
+  | 'decline-connection';
 
 export interface UiActionPayload {
   action: UiActionType;

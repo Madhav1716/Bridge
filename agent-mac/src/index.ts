@@ -1,10 +1,13 @@
+import os from 'node:os';
 import {
   BridgeServiceRecord,
   BridgeWebSocketClient,
+  ConnectionRequest,
   HostSelection,
   JsonStore,
   Logger,
   MdnsBrowser,
+  MdnsPublisher,
   UiActionPayload,
   UiActionType,
   UiBridgeServer,
@@ -19,7 +22,6 @@ import {
   resumeWorkspace,
   ResumeAccessOptions,
 } from './resumeWorkspace';
-import { openRemoteControlSession } from './remoteControl';
 import { PairingStore } from './pairingStore';
 
 interface DerivedMappings {
@@ -88,6 +90,8 @@ async function main(): Promise<void> {
 
   await ensureAutoStartPrepared(logger);
 
+  const macName = os.hostname().replace(/\.local$/, '');
+
   const initialWorkspaceState: WorkspaceState = {
     projectName: '',
     projectPath: '',
@@ -120,6 +124,7 @@ async function main(): Promise<void> {
     activeProject: null,
     projectPath: null,
     lastEvent: null,
+    pendingConnectionRequest: null,
   });
   uiBridge.start(config.uiBridgePort);
 
@@ -164,6 +169,19 @@ async function main(): Promise<void> {
       updatedAt: new Date().toISOString(),
     });
   };
+
+  // Publish this Mac on the network so Windows can discover it
+  const clientPublisher = new MdnsPublisher(logger);
+  clientPublisher.start({
+    type: 'bridgeclient',
+    name: macName,
+    port: config.uiBridgePort,
+    txt: {
+      platform: 'mac',
+      clientId: macName,
+      clientName: macName,
+    },
+  });
 
   const connectDirectHostFallback = async (): Promise<boolean> => {
     const directHost = config.windowsHost?.trim();
@@ -334,21 +352,11 @@ async function main(): Promise<void> {
 
       wsClient.send(
         createEnvelope('bridge:hello', {
-          agentId: 'mac-agent',
-          name: 'Bridge Mac Agent',
+          agentId: macName,
+          name: macName,
           platform: 'mac',
         }),
       );
-
-      if (!pairedHostId && hostId) {
-        pairedHostId = hostId;
-        pairedHostName = hostName;
-        void persistPairingState();
-        logger.info('Auto-paired with discovered host', {
-          pairedHostId,
-          pairedHostName,
-        });
-      }
     }
 
     if (status === 'DISCONNECTED') {
@@ -402,6 +410,37 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Windows is requesting to connect/pair with this Mac
+    if (message.type === 'bridge:connection-request') {
+      const request = message.payload as ConnectionRequest;
+      logger.info('Received connection request from host', {
+        hostId: request.hostId,
+        hostName: request.hostName,
+      });
+
+      // If already paired with this host, auto-approve
+      if (pairedHostId && pairedHostId === request.hostId) {
+        logger.info('Auto-approving connection from paired host');
+        wsClient.send(
+          createEnvelope('bridge:connection-response', {
+            accepted: true,
+            clientId: macName,
+            clientName: macName,
+          }),
+        );
+        return;
+      }
+
+      // Show approval request in tray
+      uiBridge.updateStatus({
+        pendingConnectionRequest: {
+          hostName: request.hostName,
+          hostId: request.hostId,
+        },
+      });
+      return;
+    }
+
     if (message.type === 'bridge:ping') {
       lastServerHeartbeatAt = Date.now();
       void stateManager.updateConnectionState({
@@ -435,25 +474,48 @@ async function main(): Promise<void> {
     void (async () => {
       const action = payload.action;
       try {
-        if (action === 'open-remote-control') {
-          const remoteService =
-            selectedService ??
-            (activeTargetHost
-              ? {
-                  id: `direct-${activeTargetHost}`,
-                  identity: activeTargetHost,
-                  name: activeTargetHost,
-                  host: activeTargetHost,
-                  port: config.windowsWsPort,
-                  addresses: [activeTargetHost],
-                  txt: {
-                    remoteControl: '1',
-                    remoteProtocol: 'rdp',
-                    remotePort: '3389',
-                  },
-                }
-              : null);
-          await openRemoteControlSession(logger, remoteService);
+        if (action === 'approve-connection') {
+          const pending = uiBridge.getStatus().pendingConnectionRequest;
+          if (pending) {
+            pairedHostId = pending.hostId;
+            pairedHostName = pending.hostName;
+            await persistPairingState();
+            logger.info('Connection approved by user', {
+              pairedHostId,
+              pairedHostName,
+            });
+
+            wsClient.send(
+              createEnvelope('bridge:connection-response', {
+                accepted: true,
+                clientId: macName,
+                clientName: macName,
+              }),
+            );
+
+            uiBridge.updateStatus({ pendingConnectionRequest: null });
+          }
+          return;
+        }
+
+        if (action === 'decline-connection') {
+          const pending = uiBridge.getStatus().pendingConnectionRequest;
+          if (pending) {
+            logger.info('Connection declined by user', {
+              hostId: pending.hostId,
+              hostName: pending.hostName,
+            });
+
+            wsClient.send(
+              createEnvelope('bridge:connection-response', {
+                accepted: false,
+                clientId: macName,
+                clientName: macName,
+              }),
+            );
+
+            uiBridge.updateStatus({ pendingConnectionRequest: null });
+          }
           return;
         }
 
@@ -546,6 +608,7 @@ async function main(): Promise<void> {
     clearInterval(heartbeatMonitorInterval);
     clearInterval(discoverySweepInterval);
     browser.stop();
+    clientPublisher.stop();
     wsClient.disconnect();
     uiBridge.stop();
     logger.info('Mac agent stopped');

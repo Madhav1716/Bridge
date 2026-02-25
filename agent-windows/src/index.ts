@@ -1,22 +1,36 @@
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import {
+  AgentHello,
+  BridgeServiceRecord,
   BridgeWebSocketServer,
   CommandCancelRequest,
   CommandRunRequest,
+  ConnectionResponse,
   createEnvelope,
   DevProcessTracker,
   JsonStore,
   Logger,
+  MdnsBrowser,
   MdnsPublisher,
   ProjectFileWatcher,
   UiBridgeServer,
+  UiDiscoveredDevice,
   WorkspaceState,
   WorkspaceStateManager,
 } from '@bridge/shared';
 import { loadWindowsAgentConfig } from './config';
 import { ensureAutoStartPrepared } from './autostart';
 import { WindowsCommandExecutor } from './commandExecutor';
+
+interface TrackedMacClient {
+  id: string;
+  name: string;
+  address: string;
+  wsClientId: number | null;
+  paired: boolean;
+  lastSeenAt: number;
+}
 
 async function main(): Promise<void> {
   const config = loadWindowsAgentConfig();
@@ -55,6 +69,13 @@ async function main(): Promise<void> {
 
   let paused = false;
 
+  // Track Mac clients: discovered via mDNS or WS
+  const macClients = new Map<string, TrackedMacClient>();
+  // Map WS client IDs to Mac client IDs
+  const wsToMac = new Map<number, string>();
+  // Paired Mac IDs persisted across restarts
+  const pairedMacIds = new Set<string>();
+
   const wsServer = new BridgeWebSocketServer(logger);
   wsServer.start(config.wsPort);
 
@@ -64,16 +85,40 @@ async function main(): Promise<void> {
     activeProject: initialState.projectName,
     projectPath: config.projectPath,
     lastEvent: initialState.lastEvent,
-    macConnected: 0,
+    connectedDevice: null,
+    discoveredDevices: [],
   });
   uiBridge.start(config.uiBridgePort);
 
+  const buildDeviceList = (): UiDiscoveredDevice[] => {
+    const devices: UiDiscoveredDevice[] = [];
+    for (const client of macClients.values()) {
+      devices.push({
+        id: client.id,
+        name: client.name,
+        address: client.address,
+        connected: client.wsClientId !== null,
+        paired: client.paired,
+      });
+    }
+    return devices;
+  };
+
+  const getConnectedDeviceName = (): string | null => {
+    for (const client of macClients.values()) {
+      if (client.paired && client.wsClientId !== null) {
+        return client.name;
+      }
+    }
+    return null;
+  };
+
   const syncUiStatus = (): void => {
-    const clientCount = paused ? 0 : wsServer.getClientIds().length;
     const state = stateManager.getState();
+    const connectedDevice = getConnectedDeviceName();
     const connectionStatus = paused
       ? 'PAUSED'
-      : clientCount > 0
+      : connectedDevice
         ? 'CONNECTED'
         : 'DISCONNECTED';
     uiBridge.updateStatus({
@@ -82,7 +127,8 @@ async function main(): Promise<void> {
       activeProject: state.projectName || null,
       projectPath: state.projectPath || null,
       lastEvent: state.lastEvent,
-      macConnected: clientCount,
+      connectedDevice,
+      discoveredDevices: buildDeviceList(),
     });
   };
 
@@ -109,13 +155,64 @@ async function main(): Promise<void> {
         ? new Date(Math.max(...heartbeatValues)).toISOString()
         : null;
 
+    const hasPairedConnected = getConnectedDeviceName() !== null;
     await stateManager.updateConnectionState({
-      lifecycle: connectedClientIds.length > 0 ? 'CONNECTED' : 'DISCONNECTED',
+      lifecycle: hasPairedConnected ? 'CONNECTED' : 'DISCONNECTED',
       hostId: config.hostId,
       hostName: config.hostName,
       lastHeartbeatAt,
     });
   };
+
+  const sendWorkspaceStateToPaired = (): void => {
+    const state = stateManager.getState();
+    const envelope = createEnvelope('workspace:state', state);
+    for (const client of macClients.values()) {
+      if (client.paired && client.wsClientId !== null) {
+        wsServer.sendToClient(client.wsClientId, envelope);
+      }
+    }
+  };
+
+  // Browse for Mac clients on the network
+  const macBrowser = new MdnsBrowser(logger);
+
+  macBrowser.on('serviceUp', (service) => {
+    const platform = service.txt.platform;
+    if (platform && platform !== 'mac') {
+      return;
+    }
+
+    const clientId = service.txt.clientId ?? service.name;
+    const existing = macClients.get(clientId);
+    macClients.set(clientId, {
+      id: clientId,
+      name: service.txt.clientName ?? service.name,
+      address: service.host,
+      wsClientId: existing?.wsClientId ?? null,
+      paired: existing?.paired ?? pairedMacIds.has(clientId),
+      lastSeenAt: Date.now(),
+    });
+
+    logger.info('Mac discovered via mDNS', {
+      clientId,
+      name: service.name,
+      host: service.host,
+    });
+
+    syncUiStatus();
+  });
+
+  macBrowser.on('serviceDown', (service) => {
+    const clientId = service.txt.clientId ?? service.name;
+    const existing = macClients.get(clientId);
+    if (existing && existing.wsClientId === null) {
+      macClients.delete(clientId);
+    }
+    syncUiStatus();
+  });
+
+  macBrowser.start('bridgeclient');
 
   wsServer.on('clientsChanged', (_count) => {
     void updateConnectionSnapshot();
@@ -124,11 +221,36 @@ async function main(): Promise<void> {
 
   wsServer.on('clientDisconnected', (clientId) => {
     commandExecutor.cancelCommandsForClient(clientId);
+    const macId = wsToMac.get(clientId);
+    if (macId) {
+      const entry = macClients.get(macId);
+      if (entry) {
+        entry.wsClientId = null;
+      }
+      wsToMac.delete(clientId);
+    }
+    syncUiStatus();
   });
 
   wsServer.on('message', (clientId, message) => {
     if (message.type === 'bridge:hello') {
+      const hello = message.payload as AgentHello;
       clientHeartbeats.set(clientId, Date.now());
+
+      const macId = hello.agentId ?? hello.name;
+      wsToMac.set(clientId, macId);
+
+      const existing = macClients.get(macId);
+      const isPaired = existing?.paired ?? pairedMacIds.has(macId);
+      macClients.set(macId, {
+        id: macId,
+        name: hello.name,
+        address: '',
+        wsClientId: clientId,
+        paired: isPaired,
+        lastSeenAt: Date.now(),
+      });
+
       logger.event(
         {
           component: 'ws-server',
@@ -136,14 +258,43 @@ async function main(): Promise<void> {
           state: stateManager.getState().connection.lifecycle,
           hostId: config.hostId,
         },
-        { clientId, payload: message.payload },
+        { clientId, macId, name: hello.name, paired: isPaired },
       );
 
-      wsServer.sendToClient(
-        clientId,
-        createEnvelope('workspace:state', stateManager.getState()),
-      );
+      if (isPaired) {
+        wsServer.sendToClient(
+          clientId,
+          createEnvelope('workspace:state', stateManager.getState()),
+        );
+      }
+
       void updateConnectionSnapshot();
+      syncUiStatus();
+      return;
+    }
+
+    if (message.type === 'bridge:connection-response') {
+      const response = message.payload as ConnectionResponse;
+      const macId = wsToMac.get(clientId) ?? response.clientId;
+
+      if (response.accepted) {
+        pairedMacIds.add(macId);
+        const entry = macClients.get(macId);
+        if (entry) {
+          entry.paired = true;
+        }
+        logger.info('Mac approved connection', { macId, clientName: response.clientName });
+
+        wsServer.sendToClient(
+          clientId,
+          createEnvelope('workspace:state', stateManager.getState()),
+        );
+      } else {
+        logger.info('Mac declined connection', { macId, clientName: response.clientName });
+      }
+
+      void updateConnectionSnapshot();
+      syncUiStatus();
       return;
     }
 
@@ -184,13 +335,44 @@ async function main(): Promise<void> {
 
   stateManager.on('changed', (state) => {
     if (!paused) {
-      wsServer.broadcast(createEnvelope('workspace:state', state));
+      sendWorkspaceStateToPaired();
     }
     syncUiStatus();
   });
 
   uiBridge.on('action', (payload) => {
     const action = payload.action;
+
+    if (action === 'connect-device' && payload.hostId) {
+      const targetMac = macClients.get(payload.hostId);
+      if (!targetMac) {
+        logger.warn('Connect device: unknown Mac', { hostId: payload.hostId });
+        return;
+      }
+
+      if (targetMac.paired) {
+        logger.info('Mac already paired', { macId: targetMac.id });
+        return;
+      }
+
+      if (targetMac.wsClientId === null) {
+        logger.warn('Connect device: Mac not connected via WebSocket yet', {
+          macId: targetMac.id,
+        });
+        return;
+      }
+
+      logger.info('Sending connection request to Mac', { macId: targetMac.id });
+      wsServer.sendToClient(
+        targetMac.wsClientId,
+        createEnvelope('bridge:connection-request', {
+          hostId: config.hostId,
+          hostName: config.hostName,
+        }),
+      );
+      return;
+    }
+
     if (action === 'pause') {
       paused = true;
       wsServer.stop();
@@ -198,6 +380,7 @@ async function main(): Promise<void> {
       logger.info('Bridge paused by user');
       return;
     }
+
     if (action === 'resume') {
       paused = false;
       wsServer.start(config.wsPort);
@@ -205,23 +388,13 @@ async function main(): Promise<void> {
       logger.info('Bridge resumed by user');
       return;
     }
+
     if (action === 'open-project') {
       try {
         spawn('explorer', [config.projectPath], { stdio: 'ignore' });
       } catch (err) {
         logger.warn('Failed to open project folder', { error: (err as Error).message });
       }
-      return;
-    }
-    if (action === 'restart-host') {
-      logger.info('Restarting Bridge host');
-      const entry = path.join(__dirname, 'index.js');
-      spawn(process.execPath, [entry], {
-        detached: true,
-        stdio: 'ignore',
-        cwd: process.cwd(),
-      });
-      process.exit(0);
     }
   });
 
@@ -239,10 +412,6 @@ async function main(): Promise<void> {
       shareName: config.shareName ?? '',
       windowsRoot: config.sharedWindowsRoot,
       shares: config.shares,
-      remoteControl: config.remoteControlEnabled ? '1' : '0',
-      remoteProtocol: config.remoteProtocol,
-      remotePort: String(config.remotePort),
-      remoteUsername: config.remoteUsername ?? '',
     },
   });
 
@@ -320,6 +489,7 @@ async function main(): Promise<void> {
     commandExecutor.stopAll();
     await fileWatcher.stop();
     publisher.stop();
+    macBrowser.stop();
     wsServer.stop();
     uiBridge.stop();
     logger.info('Windows agent stopped');
