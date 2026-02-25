@@ -78,33 +78,48 @@ function buildWindowsMenu(): Electron.Menu {
     { label: `Status: ${statusLabel}`, enabled: false },
     { label: `Connected Device: ${connectedDevice}`, enabled: false },
     { type: 'separator' },
+    { label: 'Devices on this WiFi:', enabled: false },
   ];
 
-  if (devices.length > 0) {
-    template.push({ label: 'Devices on this WiFi:', enabled: false });
+  if (devices.length === 0) {
+    template.push({
+      label: '  No devices found',
+      enabled: false,
+    });
+    template.push({
+      label: '  (Run Bridge on Mac, same WiFi)',
+      enabled: false,
+    });
+  } else {
     for (const device of devices) {
-      const suffix = device.paired ? ' (paired)' : '';
+      const suffix = device.paired ? ' (paired)' : device.connected ? ' (connected)' : '';
       template.push({
         label: `  \u2022 ${device.name}${suffix}`,
         enabled: false,
       });
     }
-    template.push({ type: 'separator' });
   }
 
+  template.push({ type: 'separator' });
+
   const unpairedDevices = devices.filter((d) => !d.paired && d.connected);
-  template.push({
-    label: 'Connect Device',
-    enabled: unpairedDevices.length > 0,
-    submenu: unpairedDevices.length > 0
-      ? unpairedDevices.map((d) => ({
-          label: d.name,
-          click: () => uiClient.sendAction('connect-device', d.id),
-        }))
-      : undefined,
-  });
+  if (unpairedDevices.length > 0) {
+    template.push({
+      label: 'Connect Device',
+      submenu: unpairedDevices.map((d) => ({
+        label: d.name,
+        click: () => uiClient.sendAction('connect-device', d.id),
+      })),
+    });
+  } else {
+    template.push({
+      label: 'Connect Device',
+      enabled: false,
+    });
+  }
 
   template.push(
+    { type: 'separator' },
     {
       label: isPaused ? 'Resume' : 'Pause',
       click: () => uiClient.sendAction(isPaused ? 'resume' : 'pause'),
@@ -113,6 +128,8 @@ function buildWindowsMenu(): Electron.Menu {
       label: 'Open Project Folder',
       click: () => uiClient.sendAction('open-project'),
     },
+    { type: 'separator' },
+    { label: 'Quit Bridge', click: () => app.quit() },
   );
 
   tray?.setTitle(`Bridge ${icon}`);
