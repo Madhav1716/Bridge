@@ -21,7 +21,7 @@ function Test-IsAdmin {
 }
 
 function Assert-Admin {
-  if (-not (Test-IsAdmin)) { throw 'Run this script as Administrator (right-click → Run as administrator).' }
+  if (-not (Test-IsAdmin)) { throw 'Run this script as Administrator (right-click, Run as administrator).' }
 }
 
 function Assert-ExitCode { param([string]$Step) if ($LASTEXITCODE -ne 0) { throw "$Step failed." } }
@@ -139,7 +139,7 @@ if ($ip) { Write-Host "From Mac: smb://$ip/$ShareName" }
 if ($rdpEnabled) {
   Write-Host ''
   Write-Host 'Full PC access: From Mac tray, use "Access Windows" to open the full Windows desktop (RDP).' -ForegroundColor Green
-  if ($ip) { Write-Host "RDP: $ip`:3389" }
+  if ($ip) { Write-Host "RDP: ${ip}:3389" }
 }
 Write-Host ''
 Write-Host 'Start Bridge:  npm run start:windows' -ForegroundColor Cyan
