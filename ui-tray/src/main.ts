@@ -160,6 +160,12 @@ async function bootstrap(): Promise<void> {
 
   tray = new Tray(createTrayIcon());
 
+  tray.on('click', () => {
+    if (tray) {
+      tray.popUpContextMenu();
+    }
+  });
+
   refreshTrayMenu();
 
   uiClient.on('status', (nextStatus) => {
