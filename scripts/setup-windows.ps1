@@ -11,7 +11,8 @@ param(
   [string]$RemoteProtocol = 'rdp',
   [string]$RemoteUsername = '',
   [switch]$UseEveryone,
-  [switch]$NoPrompt
+  [switch]$NoPrompt,
+  [switch]$Quick
 )
 
 Set-StrictMode -Version Latest
@@ -190,6 +191,23 @@ function Test-RdpHostSupport {
 }
 
 Write-Host 'Bridge Windows one-time setup' -ForegroundColor Cyan
+
+if ($Quick) {
+  $NoPrompt = $true
+  $UseEveryone = $true
+
+  if ([string]::IsNullOrWhiteSpace($WindowsProjectRoot) -or $WindowsProjectRoot -eq 'D:\Bridge\Bridge') {
+    try {
+      $repoPath = (Resolve-Path .).Path
+      $driveRoot = Split-Path -Qualifier $repoPath
+      if (-not [string]::IsNullOrWhiteSpace($driveRoot)) {
+        $WindowsProjectRoot = $driveRoot
+      }
+    } catch {
+      # keep current default
+    }
+  }
+}
 
 if (-not $NoPrompt) {
   $WindowsProjectRoot = Read-WithDefault 'Windows shared project root' $WindowsProjectRoot

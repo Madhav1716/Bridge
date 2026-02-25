@@ -15,7 +15,9 @@
     "start:tray": "npm run start --workspace ui-tray",
     "start:mac:all": "bash ./scripts/start-mac-all.sh",
     "setup:mac": "bash ./scripts/setup-mac.sh",
-    "setup:windows": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-windows.ps1"
+    "setup:mac:quick": "bash ./scripts/setup-mac.sh --quick",
+    "setup:windows": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-windows.ps1",
+    "setup:windows:quick": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-windows.ps1 -Quick"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

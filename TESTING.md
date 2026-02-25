@@ -24,10 +24,22 @@ cd /Users/maddy/Development/Bridge
 npm run setup:mac
 ```
 
+Mac quick setup (no prompts):
+```bash
+cd /Users/maddy/Development/Bridge
+BRIDGE_WINDOWS_HOST=192.168.29.65 npm run setup:mac:quick
+```
+
 Windows (Administrator PowerShell):
 ```powershell
 cd D:\Bridge\Bridge
 npm run setup:windows
+```
+
+Windows quick setup (Administrator, no prompts):
+```powershell
+cd D:\Bridge\Bridge
+npm run setup:windows:quick
 ```
 
 For simplest onboarding, pick `everyone` when setup asks for permission mode.

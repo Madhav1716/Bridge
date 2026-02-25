@@ -10,6 +10,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
+QUICK_MODE=0
+if [[ "${1:-}" == "--quick" ]]; then
+  QUICK_MODE=1
+fi
+
 prompt_with_default() {
   local prompt="$1"
   local default_value="$2"
@@ -35,12 +40,28 @@ prompt_optional() {
 echo "Bridge macOS one-time setup"
 echo
 
-WINDOWS_HOST="$(prompt_with_default "Windows host IP or name" "192.168.29.65")"
-SHARE_NAME="$(prompt_with_default "Windows SMB share name" "BridgeShare")"
-SMB_USERNAME="$(prompt_optional "Windows SMB username (optional, example: ASUS\\\\bridgeuser)")"
-WINDOWS_PROJECT_ROOT="$(prompt_with_default "Windows shared project root" "D:/Bridge/Bridge")"
-WINDOWS_COMMAND="$(prompt_with_default "Default Windows command (tray run action)" "npm -v")"
-WINDOWS_COMMAND_CWD="$(prompt_with_default "Windows command cwd" "D:/Bridge/Bridge/agent-windows")"
+DEFAULT_WINDOWS_HOST="${BRIDGE_WINDOWS_HOST:-192.168.29.65}"
+DEFAULT_SHARE_NAME="${BRIDGE_SHARE_NAME:-BridgeShare}"
+DEFAULT_SMB_USERNAME="${BRIDGE_SMB_USERNAME:-}"
+DEFAULT_WINDOWS_PROJECT_ROOT="${BRIDGE_WINDOWS_PROJECT_ROOT:-D:/}"
+DEFAULT_WINDOWS_COMMAND="${BRIDGE_WINDOWS_COMMAND:-npm -v}"
+DEFAULT_WINDOWS_COMMAND_CWD="${BRIDGE_WINDOWS_COMMAND_CWD:-D:/Bridge/Bridge/agent-windows}"
+
+if [[ "${QUICK_MODE}" -eq 1 ]]; then
+  WINDOWS_HOST="${DEFAULT_WINDOWS_HOST}"
+  SHARE_NAME="${DEFAULT_SHARE_NAME}"
+  SMB_USERNAME="${DEFAULT_SMB_USERNAME}"
+  WINDOWS_PROJECT_ROOT="${DEFAULT_WINDOWS_PROJECT_ROOT}"
+  WINDOWS_COMMAND="${DEFAULT_WINDOWS_COMMAND}"
+  WINDOWS_COMMAND_CWD="${DEFAULT_WINDOWS_COMMAND_CWD}"
+else
+  WINDOWS_HOST="$(prompt_with_default "Windows host IP or name" "${DEFAULT_WINDOWS_HOST}")"
+  SHARE_NAME="$(prompt_with_default "Windows SMB share name" "${DEFAULT_SHARE_NAME}")"
+  SMB_USERNAME="$(prompt_optional "Windows SMB username (optional, example: ASUS\\\\bridgeuser)")"
+  WINDOWS_PROJECT_ROOT="$(prompt_with_default "Windows shared project root" "${DEFAULT_WINDOWS_PROJECT_ROOT}")"
+  WINDOWS_COMMAND="$(prompt_with_default "Default Windows command (tray run action)" "${DEFAULT_WINDOWS_COMMAND}")"
+  WINDOWS_COMMAND_CWD="$(prompt_with_default "Windows command cwd" "${DEFAULT_WINDOWS_COMMAND_CWD}")"
+fi
 
 ENCODED_SHARE_NAME="$(SHARE_NAME="${SHARE_NAME}" node -e 'process.stdout.write(encodeURIComponent(process.env.SHARE_NAME || ""))')"
 SMB_AUTHORITY="${WINDOWS_HOST}"

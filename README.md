@@ -157,10 +157,22 @@ cd /Users/maddy/Development/Bridge
 npm run setup:mac
 ```
 
+Mac one-command quick setup (no prompts):
+```bash
+cd /Users/maddy/Development/Bridge
+BRIDGE_WINDOWS_HOST=192.168.29.65 npm run setup:mac:quick
+```
+
 Windows setup (run in Administrator PowerShell):
 ```powershell
 cd D:\Bridge\Bridge
 npm run setup:windows
+```
+
+Windows one-command quick setup (no prompts, shares current drive root, enables RDP):
+```powershell
+cd D:\Bridge\Bridge
+npm run setup:windows:quick
 ```
 
 When prompted for permission mode, choose `everyone` for easiest first-time setup (no dedicated SMB user required).
