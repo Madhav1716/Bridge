@@ -386,6 +386,14 @@ async function main(): Promise<void> {
       const workspaceState = message.payload as WorkspaceState;
       lastServerHeartbeatAt = Date.now();
 
+      const hostId = selectedService?.identity ?? workspaceState.connection.hostId ?? activeTargetHost;
+      const hostName = selectedService?.name ?? workspaceState.hostDevice ?? activeTargetHost;
+      if (hostId && (!pairedHostId || pairedHostId === hostId)) {
+        pairedHostId = hostId;
+        pairedHostName = hostName ?? hostId;
+        void persistPairingState();
+      }
+
       void stateManager.updateWorkspaceMetadata({
         projectName: workspaceState.projectName,
         projectPath: workspaceState.projectPath,
@@ -410,7 +418,6 @@ async function main(): Promise<void> {
       return;
     }
 
-    // Windows is requesting to connect/pair with this Mac
     if (message.type === 'bridge:connection-request') {
       const request = message.payload as ConnectionRequest;
       logger.info('Received connection request from host', {

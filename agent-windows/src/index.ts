@@ -219,6 +219,22 @@ async function main(): Promise<void> {
     syncUiStatus();
   });
 
+  wsServer.on('clientConnected', (clientId, socket) => {
+    const raw = socket as { remoteAddress?: string; _socket?: { remoteAddress?: string } };
+    const address = raw.remoteAddress ?? raw._socket?.remoteAddress ?? '';
+    const placeholderId = `pending-${clientId}`;
+    macClients.set(placeholderId, {
+      id: placeholderId,
+      name: 'Connecting...',
+      address,
+      wsClientId: clientId,
+      paired: false,
+      lastSeenAt: Date.now(),
+    });
+    logger.info('WebSocket client connected, waiting for hello', { clientId, address });
+    syncUiStatus();
+  });
+
   wsServer.on('clientDisconnected', (clientId) => {
     commandExecutor.cancelCommandsForClient(clientId);
     const macId = wsToMac.get(clientId);
@@ -229,6 +245,7 @@ async function main(): Promise<void> {
       }
       wsToMac.delete(clientId);
     }
+    macClients.delete(`pending-${clientId}`);
     syncUiStatus();
   });
 
@@ -240,14 +257,15 @@ async function main(): Promise<void> {
       const macId = hello.agentId ?? hello.name;
       wsToMac.set(clientId, macId);
 
-      const existing = macClients.get(macId);
-      const isPaired = existing?.paired ?? pairedMacIds.has(macId);
+      macClients.delete(`pending-${clientId}`);
+
+      pairedMacIds.add(macId);
       macClients.set(macId, {
         id: macId,
         name: hello.name,
         address: '',
         wsClientId: clientId,
-        paired: isPaired,
+        paired: true,
         lastSeenAt: Date.now(),
       });
 
@@ -258,15 +276,13 @@ async function main(): Promise<void> {
           state: stateManager.getState().connection.lifecycle,
           hostId: config.hostId,
         },
-        { clientId, macId, name: hello.name, paired: isPaired },
+        { clientId, macId, name: hello.name },
       );
 
-      if (isPaired) {
-        wsServer.sendToClient(
-          clientId,
-          createEnvelope('workspace:state', stateManager.getState()),
-        );
-      }
+      wsServer.sendToClient(
+        clientId,
+        createEnvelope('workspace:state', stateManager.getState()),
+      );
 
       void updateConnectionSnapshot();
       syncUiStatus();

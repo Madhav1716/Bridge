@@ -87,7 +87,11 @@ function buildWindowsMenu(): Electron.Menu {
       enabled: false,
     });
     template.push({
-      label: '  (Run Bridge on Mac, same WiFi)',
+      label: '  Run Bridge on Mac (same WiFi)',
+      enabled: false,
+    });
+    template.push({
+      label: '  If Mac is running: run setup on Windows as Admin',
       enabled: false,
     });
   } else {

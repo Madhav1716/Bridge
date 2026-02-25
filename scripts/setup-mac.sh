@@ -18,38 +18,12 @@ fi
 echo "Bridge — Mac one-time setup"
 echo ""
 
-# Only ask for Windows IP when mDNS might not work. Everything else is automatic.
-DEFAULT_WINDOWS_HOST="${BRIDGE_WINDOWS_HOST:-}"
-
-if [[ "${QUICK_MODE}" -eq 1 ]]; then
-  WINDOWS_HOST="${DEFAULT_WINDOWS_HOST}"
-else
-  echo "Bridge will find your Windows PC on the network automatically."
-  echo "Only enter an IP below if it can't find it (e.g. strict firewall)."
-  echo ""
-  read -r -p "Windows PC IP address (press Enter to skip): " WINDOWS_HOST
-  WINDOWS_HOST="${WINDOWS_HOST:-$DEFAULT_WINDOWS_HOST}"
-fi
-
 CONFIG_DIR="${REPO_ROOT}"
 CONFIG_PATH="${CONFIG_DIR}/bridge.mac.json"
-
 mkdir -p "${CONFIG_DIR}"
 
-if [[ -n "${WINDOWS_HOST:-}" ]]; then
-  CONFIG_PATH="${CONFIG_PATH}" WINDOWS_HOST="${WINDOWS_HOST}" node -e "
-const fs = require('node:fs');
-const config = {
-  discoveryType: 'bridgeworkspace',
-  windowsHost: process.env.WINDOWS_HOST.trim(),
-  windowsWsPort: 47831,
-};
-const configPath = process.env.CONFIG_PATH;
-fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
-console.log('Saved config with Windows fallback:', configPath);
-"
-else
-  CONFIG_PATH="${CONFIG_PATH}" node -e "
+# No IP. Bridge discovers Windows automatically on the same WiFi (mDNS).
+CONFIG_PATH="${CONFIG_PATH}" node -e "
 const fs = require('node:fs');
 const config = {
   discoveryType: 'bridgeworkspace',
@@ -57,9 +31,8 @@ const config = {
 };
 const configPath = process.env.CONFIG_PATH;
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
-console.log('Saved config (auto-discover only):', configPath);
+console.log('Saved config:', configPath);
 "
-fi
 
 echo ""
 echo "Setup complete."

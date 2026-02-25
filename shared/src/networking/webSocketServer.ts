@@ -7,7 +7,7 @@ import { parseEnvelope } from './wsProtocol';
 interface ServerEvents {
   message: (clientId: number, message: MessageEnvelope) => void;
   clientsChanged: (count: number) => void;
-  clientConnected: (clientId: number) => void;
+  clientConnected: (clientId: number, socket: WebSocket) => void;
   clientDisconnected: (clientId: number) => void;
 }
 
@@ -33,7 +33,7 @@ export class BridgeWebSocketServer extends EventEmitter {
       this.clients.set(clientId, socket);
       this.logger.info('WebSocket client connected', { clientId });
       this.emit('clientsChanged', this.clients.size);
-      this.emit('clientConnected', clientId);
+      this.emit('clientConnected', clientId, socket);
 
       socket.on('message', (data: Buffer | Buffer[] | string) => {
         const parsed = parseEnvelope(data.toString());
