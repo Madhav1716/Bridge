@@ -18,6 +18,9 @@ let status: UiStatusSnapshot = {
   activeCommandRequestId: null,
   commandExitCode: null,
   lastCommandAt: null,
+  pairedHostId: null,
+  pairedHostName: null,
+  discoveredHosts: [],
 };
 
 function createTrayIcon() {
@@ -97,8 +100,28 @@ function buildMenu(): Electron.Menu {
       ? { label: 'Resume', action: 'resume' as const }
       : { label: 'Pause', action: 'pause' as const };
   const commandRunning = status.commandState === 'running';
+  const discoveredHosts = status.discoveredHosts ?? [];
+  const pairedHostLabel = status.pairedHostName ?? status.pairedHostId ?? 'None';
 
-  return Menu.buildFromTemplate([
+  const deviceItems: Electron.MenuItemConstructorOptions[] =
+    discoveredHosts.length === 0
+      ? [
+          {
+            label: 'No Windows hosts found',
+            enabled: false,
+          },
+        ]
+      : discoveredHosts.map((host) => {
+          const prefix = host.isConnected ? '🟢' : host.isPaired ? '⭐' : '⚪';
+          return {
+            label: `${prefix} ${host.hostName} (${host.address})`,
+            click: () => {
+              uiClient.sendAction('pair-host', host.hostId);
+            },
+          };
+        });
+
+  const template: Electron.MenuItemConstructorOptions[] = [
     {
       label: `${lifecycle.icon} ${lifecycle.text}`,
       enabled: false,
@@ -119,6 +142,21 @@ function buildMenu(): Electron.Menu {
       label: getCommandStatusLabel(status),
       enabled: false,
     },
+    {
+      type: 'separator',
+    },
+    {
+      label: `Paired Host: ${pairedHostLabel}`,
+      enabled: false,
+    },
+    {
+      label: 'Forget Paired Host',
+      enabled: Boolean(status.pairedHostId),
+      click: () => {
+        uiClient.sendAction('clear-paired-host');
+      },
+    },
+    ...deviceItems,
     {
       type: 'separator',
     },
@@ -176,7 +214,9 @@ function buildMenu(): Electron.Menu {
         app.quit();
       },
     },
-  ]);
+  ];
+
+  return Menu.buildFromTemplate(template);
 }
 
 function refreshTrayMenu(): void {

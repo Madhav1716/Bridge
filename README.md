@@ -129,7 +129,7 @@ Decision:
 
 Includes:
 - Connection/host/project/last-event status
-- Quick actions: reconnect, pause/resume, open project folder, resume workspace, control Windows (RDP), run/cancel Windows command
+- Quick actions: reconnect, pause/resume, open project folder, resume workspace, control Windows (RDP), pair/forget host, run/cancel Windows command
 
 ## Prerequisites
 
@@ -163,6 +163,8 @@ cd /Users/maddy/Development/Bridge
 BRIDGE_WINDOWS_HOST=192.168.29.65 npm run setup:mac:quick
 ```
 
+If mDNS discovery is blocked on your LAN, Bridge will use `windowsHost` + `windowsWsPort` as direct fallback.
+
 Windows setup (run in Administrator PowerShell):
 ```powershell
 cd D:\Bridge\Bridge
@@ -184,16 +186,22 @@ These scripts:
 - trigger the first SMB mount prompt on Mac
 - let Mac setup optionally store SMB username in `smb://user@host/share` format
 - enable Windows Remote Desktop and publish RDP metadata for tray-based remote control
+- store Windows host fallback (`windowsHost`) so Bridge can connect even when mDNS is blocked
 
 Daily run after setup:
 - Windows: `npm run start:windows`
 - Mac (agent + tray together): `npm run start:mac:all`
 
+Pairing flow:
+1. Tray lists discovered Windows hosts.
+2. Click a host once to pair it.
+3. Bridge remembers that host and reconnects to it automatically on next launches.
+
 You can also create configs manually:
 
 Mac manual:
 1. Copy [bridge.mac.example.json](/Users/maddy/Development/Bridge/bridge.mac.example.json) to `bridge.mac.json`.
-2. Update `windowsProjectRoot`, `smbRoot`, and `smbMountRoot`.
+2. Update `windowsHost`, `windowsWsPort`, `windowsProjectRoot`, `smbRoot`, and `smbMountRoot`.
 3. Start with `npm run start:mac`.
 
 Windows manual:
@@ -255,6 +263,8 @@ npm run start:mac:all
 Optional environment variables:
 - `BRIDGE_UI_BRIDGE_PORT` (default `47832`)
 - `BRIDGE_DISCOVERY_TYPE` (default `bridgeworkspace`)
+- `BRIDGE_WINDOWS_HOST` (direct websocket fallback host when mDNS is unavailable)
+- `BRIDGE_WINDOWS_WS_PORT` (default `47831`)
 - `BRIDGE_MAC_STATE_PATH`
 - `BRIDGE_PING_MS` (default `5000`)
 - `BRIDGE_HEARTBEAT_TIMEOUT_MS` (default `12000`)

@@ -9,6 +9,9 @@ import {
   JsonStore,
   Logger,
   MdnsBrowser,
+  TrackedHost,
+  UiActionPayload,
+  UiDiscoveredHost,
   UiActionType,
   UiBridgeServer,
   WorkspaceState,
@@ -24,6 +27,7 @@ import {
   ResumeAccessOptions,
 } from './resumeWorkspace';
 import { openRemoteControlSession } from './remoteControl';
+import { PairingStore } from './pairingStore';
 
 function deriveAutoMapping(
   service: BridgeServiceRecord | null,
@@ -111,6 +115,9 @@ async function main(): Promise<void> {
     activeCommandRequestId: null,
     commandExitCode: null,
     lastCommandAt: null,
+    pairedHostId: null,
+    pairedHostName: null,
+    discoveredHosts: [],
   });
   uiBridge.start(config.uiBridgePort);
 
@@ -138,18 +145,127 @@ async function main(): Promise<void> {
   const hostSelection = new HostSelection({
     staleAfterMs: config.discoveryStaleMs,
   });
+  const pairingStore = new PairingStore(logger, config.pairingPath);
+  const pairingState = await pairingStore.load();
 
   let selectedService: BridgeServiceRecord | null = null;
+  let activeTargetHost: string | null = config.windowsHost ?? null;
   let lastServerHeartbeatAt = 0;
   let heartbeatReconnectIssued = false;
   let activeCommandRequestId: string | null = null;
+  let pairedHostId: string | null = pairingState.pairedHostId;
+  let pairedHostName: string | null = pairingState.pairedHostName;
+
+  const buildDiscoveredHostsSnapshot = (): UiDiscoveredHost[] => {
+    const trackedHosts = hostSelection.listHosts();
+    return trackedHosts.map((tracked: TrackedHost) => {
+      const isPaired = pairedHostId !== null && tracked.identity === pairedHostId;
+      const isConnected =
+        selectedService?.identity === tracked.identity &&
+        stateManager.getState().connection.lifecycle === 'CONNECTED';
+
+      return {
+        hostId: tracked.identity,
+        hostName: tracked.service.name,
+        address: tracked.service.host,
+        lastSeenAt: tracked.lastSeenAt,
+        seenCount: tracked.seenCount,
+        isPaired,
+        isConnected,
+      };
+    });
+  };
+
+  const syncDiscoverySnapshot = (): void => {
+    uiBridge.updateStatus({
+      pairedHostId,
+      pairedHostName,
+      discoveredHosts: buildDiscoveredHostsSnapshot(),
+    });
+  };
+
+  const persistPairingState = async (): Promise<void> => {
+    await pairingStore.save({
+      pairedHostId,
+      pairedHostName,
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
+  syncDiscoverySnapshot();
+
+  const connectDirectHostFallback = async (): Promise<boolean> => {
+    const directHost = config.windowsHost?.trim();
+    if (!directHost) {
+      return false;
+    }
+
+    activeTargetHost = directHost;
+
+    if (wsClient.getStatus() === 'PAUSED') {
+      await stateManager.updateConnectionState({
+        lifecycle: 'PAUSED',
+        hostId: directHost,
+        hostName: directHost,
+      });
+      return true;
+    }
+
+    const wsStatus = wsClient.getStatus();
+    if (
+      wsStatus === 'CONNECTED' ||
+      wsStatus === 'CONNECTING' ||
+      wsStatus === 'RECONNECTING'
+    ) {
+      return true;
+    }
+
+    const targetUrl = `ws://${directHost}:${config.windowsWsPort}`;
+    logger.event(
+      {
+        component: 'ws-client',
+        event: 'direct-connect-attempt',
+        state: stateManager.getState().connection.lifecycle,
+        hostId: directHost,
+      },
+      { targetUrl },
+    );
+
+    await stateManager.updateConnectionState({
+      lifecycle: 'CONNECTING',
+      hostId: directHost,
+      hostName: directHost,
+    });
+
+    wsClient.connect(targetUrl);
+    return true;
+  };
 
   const connectToSelectedService = async (): Promise<void> => {
-    const preferred = hostSelection.selectPreferred(selectedService?.identity);
+    const pairedHostMatch = pairedHostId
+      ? hostSelection
+          .listHosts()
+          .find((trackedHost) => trackedHost.identity === pairedHostId)
+      : undefined;
+    const preferred =
+      pairedHostMatch?.service ??
+      hostSelection.selectPreferred(selectedService?.identity ?? pairedHostId ?? undefined);
     if (!preferred) {
       selectedService = null;
 
-      if (wsClient.getStatus() !== 'PAUSED') {
+      if (wsClient.getStatus() === 'PAUSED') {
+        await stateManager.updateConnectionState({
+          lifecycle: 'PAUSED',
+          hostId: activeTargetHost,
+          hostName: activeTargetHost,
+        });
+        syncDiscoverySnapshot();
+        return;
+      }
+
+      const usedDirectFallback = await connectDirectHostFallback();
+      if (!usedDirectFallback) {
+        activeTargetHost = null;
         await stateManager.updateConnectionState({
           lifecycle: 'DISCOVERING',
           hostId: null,
@@ -157,11 +273,13 @@ async function main(): Promise<void> {
         });
       }
 
+      syncDiscoverySnapshot();
       return;
     }
 
     const previousSelected = selectedService;
     selectedService = preferred;
+    activeTargetHost = preferred.host;
 
     if (wsClient.getStatus() === 'PAUSED') {
       await stateManager.updateConnectionState({
@@ -169,13 +287,14 @@ async function main(): Promise<void> {
         hostId: preferred.identity,
         hostName: preferred.name,
       });
+      syncDiscoverySnapshot();
       return;
     }
 
     const sameHost = previousSelected?.identity === preferred.identity;
     const wsStatus = wsClient.getStatus();
     if (
-      sameHost &&
+      (sameHost || activeTargetHost === preferred.host) &&
       (wsStatus === 'CONNECTED' ||
         wsStatus === 'CONNECTING' ||
         wsStatus === 'RECONNECTING')
@@ -190,6 +309,7 @@ async function main(): Promise<void> {
     });
 
     wsClient.connect(`ws://${preferred.host}:${preferred.port}`);
+    syncDiscoverySnapshot();
   };
 
   browser.on('serviceUp', (service) => {
@@ -212,6 +332,7 @@ async function main(): Promise<void> {
       },
     );
 
+    syncDiscoverySnapshot();
     void connectToSelectedService();
   });
 
@@ -227,6 +348,7 @@ async function main(): Promise<void> {
       { serviceId: service.id },
     );
 
+    syncDiscoverySnapshot();
     void connectToSelectedService();
   });
 
@@ -238,8 +360,8 @@ async function main(): Promise<void> {
   });
 
   wsClient.on('status', (status) => {
-    const hostId = selectedService?.identity ?? null;
-    const hostName = selectedService?.name ?? null;
+    const hostId = selectedService?.identity ?? activeTargetHost ?? null;
+    const hostName = selectedService?.name ?? activeTargetHost ?? null;
 
     if (status === 'CONNECTED') {
       lastServerHeartbeatAt = Date.now();
@@ -283,6 +405,8 @@ async function main(): Promise<void> {
       });
       activeCommandRequestId = null;
     }
+
+    syncDiscoverySnapshot();
   });
 
   wsClient.on('message', (message) => {
@@ -318,15 +442,15 @@ async function main(): Promise<void> {
       lastServerHeartbeatAt = Date.now();
       void stateManager.updateConnectionState({
         lifecycle: 'CONNECTED',
-        hostId: selectedService?.identity ?? null,
-        hostName: selectedService?.name ?? null,
+        hostId: selectedService?.identity ?? activeTargetHost ?? null,
+        hostName: selectedService?.name ?? activeTargetHost ?? null,
         lastHeartbeatAt: new Date().toISOString(),
       });
 
       wsClient.send(
         createEnvelope('bridge:pong', {
           timestamp: new Date().toISOString(),
-          hostId: selectedService?.identity,
+          hostId: selectedService?.identity ?? activeTargetHost ?? undefined,
         }),
       );
       return;
@@ -336,8 +460,8 @@ async function main(): Promise<void> {
       lastServerHeartbeatAt = Date.now();
       void stateManager.updateConnectionState({
         lifecycle: 'CONNECTED',
-        hostId: selectedService?.identity ?? null,
-        hostName: selectedService?.name ?? null,
+        hostId: selectedService?.identity ?? activeTargetHost ?? null,
+        hostName: selectedService?.name ?? activeTargetHost ?? null,
         lastHeartbeatAt: new Date().toISOString(),
       });
       return;
@@ -360,7 +484,7 @@ async function main(): Promise<void> {
           component: 'remote-command',
           event: 'started',
           state: stateManager.getState().connection.lifecycle,
-          hostId: selectedService?.identity ?? undefined,
+          hostId: selectedService?.identity ?? activeTargetHost ?? undefined,
         },
         {
           requestId: started.requestId,
@@ -410,7 +534,7 @@ async function main(): Promise<void> {
           component: 'remote-command',
           event: 'completed',
           state: stateManager.getState().connection.lifecycle,
-          hostId: selectedService?.identity ?? undefined,
+          hostId: selectedService?.identity ?? activeTargetHost ?? undefined,
         },
         {
           requestId: completed.requestId,
@@ -444,13 +568,48 @@ async function main(): Promise<void> {
     }
   });
 
-  uiBridge.on('action', (action: UiActionType) => {
+  uiBridge.on('action', (payload: UiActionPayload) => {
     void (async () => {
+      const action = payload.action;
       try {
         const dynamicMapping =
           config.pathMapping ?? deriveAutoMapping(selectedService);
         const dynamicMountRoot =
           config.smbMountRoot ?? deriveAutoMountRoot(selectedService);
+
+        if (action === 'pair-host') {
+          const requestedHostId = payload.hostId?.trim();
+          if (!requestedHostId) {
+            logger.warn('Pair host action received without hostId');
+            return;
+          }
+
+          const trackedHost = hostSelection
+            .listHosts()
+            .find((candidate) => candidate.identity === requestedHostId);
+          if (!trackedHost) {
+            logger.warn('Requested host is not currently discoverable', {
+              requestedHostId,
+            });
+            return;
+          }
+
+          pairedHostId = trackedHost.identity;
+          pairedHostName = trackedHost.service.name;
+          await persistPairingState();
+          syncDiscoverySnapshot();
+          void connectToSelectedService();
+          return;
+        }
+
+        if (action === 'clear-paired-host') {
+          pairedHostId = null;
+          pairedHostName = null;
+          await persistPairingState();
+          syncDiscoverySnapshot();
+          void connectToSelectedService();
+          return;
+        }
 
         if (action === 'run-windows-command') {
           if (wsClient.getStatus() !== 'CONNECTED') {
@@ -506,6 +665,29 @@ async function main(): Promise<void> {
           return;
         }
 
+        if (action === 'open-remote-control') {
+          const remoteService =
+            selectedService ??
+            (activeTargetHost
+              ? {
+                  id: `direct-${activeTargetHost}`,
+                  identity: activeTargetHost,
+                  name: activeTargetHost,
+                  host: activeTargetHost,
+                  port: config.windowsWsPort,
+                  addresses: [activeTargetHost],
+                  txt: {
+                    remoteControl: '1',
+                    remoteProtocol: 'rdp',
+                    remotePort: '3389',
+                  },
+                }
+              : null);
+
+          await openRemoteControlSession(logger, remoteService);
+          return;
+        }
+
         await handleUiAction(
           logger,
           action,
@@ -537,7 +719,7 @@ async function main(): Promise<void> {
     wsClient.send(
       createEnvelope('bridge:ping', {
         timestamp: new Date().toISOString(),
-        hostId: selectedService?.identity,
+        hostId: selectedService?.identity ?? activeTargetHost ?? undefined,
       }),
     );
   }, config.pingMs);
@@ -566,8 +748,8 @@ async function main(): Promise<void> {
 
     void stateManager.updateConnectionState({
       lifecycle: 'RECONNECTING',
-      hostId: selectedService?.identity ?? null,
-      hostName: selectedService?.name ?? null,
+      hostId: selectedService?.identity ?? activeTargetHost ?? null,
+      hostName: selectedService?.name ?? activeTargetHost ?? null,
     });
 
     wsClient.reconnectNow();
@@ -580,6 +762,7 @@ async function main(): Promise<void> {
         count: removedHosts.length,
         staleAfterMs: config.discoveryStaleMs,
       });
+      syncDiscoverySnapshot();
     }
 
     void connectToSelectedService();
@@ -652,11 +835,6 @@ async function handleUiAction(
   if (action === 'resume') {
     wsClient.setPaused(false);
     await connectToSelectedService();
-    return;
-  }
-
-  if (action === 'open-remote-control') {
-    await openRemoteControlSession(logger, selectedService);
     return;
   }
 

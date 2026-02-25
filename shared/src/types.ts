@@ -123,6 +123,19 @@ export interface UiStatusSnapshot {
   activeCommandRequestId?: string | null;
   commandExitCode?: number | null;
   lastCommandAt?: string | null;
+  pairedHostId?: string | null;
+  pairedHostName?: string | null;
+  discoveredHosts?: UiDiscoveredHost[];
+}
+
+export interface UiDiscoveredHost {
+  hostId: string;
+  hostName: string;
+  address: string;
+  lastSeenAt: number;
+  seenCount: number;
+  isPaired: boolean;
+  isConnected: boolean;
 }
 
 export type UiActionType =
@@ -132,9 +145,16 @@ export type UiActionType =
   | 'open-project'
   | 'resume-workspace'
   | 'open-remote-control'
+  | 'pair-host'
+  | 'clear-paired-host'
   | 'run-windows-command'
   | 'cancel-windows-command';
 
+export interface UiActionPayload {
+  action: UiActionType;
+  hostId?: string;
+}
+
 export type UiBridgeMessage =
   | MessageEnvelope<'ui:status', UiStatusSnapshot>
-  | MessageEnvelope<'ui:action', { action: UiActionType }>;
+  | MessageEnvelope<'ui:action', UiActionPayload>;

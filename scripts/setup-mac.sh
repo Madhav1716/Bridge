@@ -41,6 +41,7 @@ echo "Bridge macOS one-time setup"
 echo
 
 DEFAULT_WINDOWS_HOST="${BRIDGE_WINDOWS_HOST:-192.168.29.65}"
+DEFAULT_WINDOWS_WS_PORT="${BRIDGE_WINDOWS_WS_PORT:-47831}"
 DEFAULT_SHARE_NAME="${BRIDGE_SHARE_NAME:-BridgeShare}"
 DEFAULT_SMB_USERNAME="${BRIDGE_SMB_USERNAME:-}"
 DEFAULT_WINDOWS_PROJECT_ROOT="${BRIDGE_WINDOWS_PROJECT_ROOT:-D:/}"
@@ -49,6 +50,7 @@ DEFAULT_WINDOWS_COMMAND_CWD="${BRIDGE_WINDOWS_COMMAND_CWD:-D:/Bridge/Bridge/agen
 
 if [[ "${QUICK_MODE}" -eq 1 ]]; then
   WINDOWS_HOST="${DEFAULT_WINDOWS_HOST}"
+  WINDOWS_WS_PORT="${DEFAULT_WINDOWS_WS_PORT}"
   SHARE_NAME="${DEFAULT_SHARE_NAME}"
   SMB_USERNAME="${DEFAULT_SMB_USERNAME}"
   WINDOWS_PROJECT_ROOT="${DEFAULT_WINDOWS_PROJECT_ROOT}"
@@ -56,6 +58,7 @@ if [[ "${QUICK_MODE}" -eq 1 ]]; then
   WINDOWS_COMMAND_CWD="${DEFAULT_WINDOWS_COMMAND_CWD}"
 else
   WINDOWS_HOST="$(prompt_with_default "Windows host IP or name" "${DEFAULT_WINDOWS_HOST}")"
+  WINDOWS_WS_PORT="$(prompt_with_default "Windows websocket port" "${DEFAULT_WINDOWS_WS_PORT}")"
   SHARE_NAME="$(prompt_with_default "Windows SMB share name" "${DEFAULT_SHARE_NAME}")"
   SMB_USERNAME="$(prompt_optional "Windows SMB username (optional, example: ASUS\\\\bridgeuser)")"
   WINDOWS_PROJECT_ROOT="$(prompt_with_default "Windows shared project root" "${DEFAULT_WINDOWS_PROJECT_ROOT}")"
@@ -73,6 +76,7 @@ SMB_ROOT="smb://${SMB_AUTHORITY}/${ENCODED_SHARE_NAME}"
 MOUNT_ROOT="/Volumes/${SHARE_NAME}"
 
 WINDOWS_HOST="${WINDOWS_HOST}" \
+WINDOWS_WS_PORT="${WINDOWS_WS_PORT}" \
 SHARE_NAME="${SHARE_NAME}" \
 WINDOWS_PROJECT_ROOT="${WINDOWS_PROJECT_ROOT}" \
 SMB_ROOT="${SMB_ROOT}" \
@@ -86,6 +90,8 @@ const path = require('node:path');
 const configPath = path.join(process.cwd(), 'bridge.mac.json');
 const config = {
   discoveryType: 'bridgeworkspace',
+  windowsHost: process.env.WINDOWS_HOST,
+  windowsWsPort: Number(process.env.WINDOWS_WS_PORT || '47831'),
   windowsProjectRoot: process.env.WINDOWS_PROJECT_ROOT,
   smbRoot: process.env.SMB_ROOT,
   smbMountRoot: process.env.MOUNT_ROOT,

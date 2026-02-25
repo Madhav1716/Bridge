@@ -1,5 +1,8 @@
 {
   "discoveryType": "bridgeworkspace",
+  "windowsHost": "192.168.29.65",
+  "windowsWsPort": 47831,
+  "pairingPath": "/Users/<you>/Library/Application Support/Bridge/mac-pairing.json",
   "windowsProjectRoot": "D:/Bridge/Bridge",
   "smbRoot": "smb://192.168.29.65/BridgeShare",
   "smbMountRoot": "/Volumes/BridgeShare",

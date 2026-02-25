@@ -1,11 +1,16 @@
 import { EventEmitter } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 import { Logger } from '../logger';
-import { MessageEnvelope, UiActionType, UiStatusSnapshot } from '../types';
+import {
+  MessageEnvelope,
+  UiActionPayload,
+  UiActionType,
+  UiStatusSnapshot,
+} from '../types';
 import { createEnvelope, parseEnvelope } from '../networking/wsProtocol';
 
 interface UiBridgeEvents {
-  action: (action: UiActionType) => void;
+  action: (payload: UiActionPayload) => void;
 }
 
 export class UiBridgeServer extends EventEmitter {
@@ -45,12 +50,15 @@ export class UiBridgeServer extends EventEmitter {
           return;
         }
 
-        const action = (message.payload as { action?: UiActionType }).action;
-        if (!action) {
+        const payload = message.payload as Partial<UiActionPayload>;
+        if (!payload.action) {
           return;
         }
 
-        this.emit('action', action);
+        this.emit('action', {
+          action: payload.action as UiActionType,
+          hostId: payload.hostId,
+        });
       });
 
       socket.on('close', () => {

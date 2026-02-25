@@ -150,6 +150,12 @@ npm run start:tray
 1. Tray reaches `🟢 Connected`.
 2. Host + project are shown.
 
+### A1) Pair once, remember forever
+1. In tray, pick a host from discovered hosts list.
+2. Confirm `Paired Host` updates.
+3. Restart Mac agent/tray.
+4. Confirm Bridge reconnects to that paired host automatically.
+
 ### B) Workspace continuity
 1. Click `Open Project Folder` -> shared folder opens on Mac.
 2. Click `Resume Workspace` -> folder + recent files open.
@@ -188,6 +194,12 @@ npm run start:tray
 1. Confirm both devices are on same LAN.
 2. Confirm both use `BRIDGE_DISCOVERY_TYPE=bridgeworkspace`.
 3. Confirm Windows agent is running and firewall allows Node/File sharing.
+4. Set direct host fallback and restart Mac agent:
+```bash
+BRIDGE_WINDOWS_HOST=<WINDOWS_IP> npm run setup:mac:quick
+npm run start:mac:all
+```
+5. Pair the host once from tray device list so Bridge remembers it.
 
 ### Resume says mapping required
 Set either:

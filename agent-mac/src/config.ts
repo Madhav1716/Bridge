@@ -5,6 +5,9 @@ import { PathMappingOptions } from '@bridge/shared';
 
 interface MacConfigFile {
   discoveryType?: string;
+  windowsHost?: string;
+  windowsWsPort?: number;
+  pairingPath?: string;
   statePath?: string;
   uiBridgePort?: number;
   pingMs?: number;
@@ -21,6 +24,9 @@ interface MacConfigFile {
 
 export interface MacAgentConfig {
   discoveryType: string;
+  windowsHost?: string;
+  windowsWsPort: number;
+  pairingPath: string;
   statePath: string;
   uiBridgePort: number;
   pingMs: number;
@@ -94,6 +100,17 @@ export function loadMacAgentConfig(): MacAgentConfig {
       'mac-state.json',
     );
 
+  const pairingPath =
+    process.env.BRIDGE_MAC_PAIRING_PATH ??
+    fileConfig.pairingPath ??
+    path.join(
+      os.homedir(),
+      'Library',
+      'Application Support',
+      'Bridge',
+      'mac-pairing.json',
+    );
+
   const windowsRoot =
     process.env.BRIDGE_WINDOWS_PROJECT_ROOT ?? fileConfig.windowsProjectRoot;
   const smbRoot = process.env.BRIDGE_SMB_ROOT ?? fileConfig.smbRoot;
@@ -110,6 +127,12 @@ export function loadMacAgentConfig(): MacAgentConfig {
       process.env.BRIDGE_DISCOVERY_TYPE ??
       fileConfig.discoveryType ??
       'bridgeworkspace',
+    windowsHost: process.env.BRIDGE_WINDOWS_HOST ?? fileConfig.windowsHost,
+    windowsWsPort:
+      process.env.BRIDGE_WINDOWS_WS_PORT !== undefined
+        ? toNumber(process.env.BRIDGE_WINDOWS_WS_PORT, 47831)
+        : toNumberFromUnknown(fileConfig.windowsWsPort, 47831),
+    pairingPath,
     statePath,
     uiBridgePort:
       process.env.BRIDGE_UI_BRIDGE_PORT !== undefined

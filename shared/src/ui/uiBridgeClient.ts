@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { Logger } from '../logger';
 import { BridgeWebSocketClient } from '../networking/webSocketClient';
 import { createEnvelope } from '../networking/wsProtocol';
-import { UiActionType, UiStatusSnapshot } from '../types';
+import { UiActionPayload, UiActionType, UiStatusSnapshot } from '../types';
 
 interface UiClientEvents {
   status: (status: UiStatusSnapshot) => void;
@@ -42,7 +42,15 @@ export class UiBridgeClient extends EventEmitter {
     this.wsClient.disconnect();
   }
 
-  public sendAction(action: UiActionType): void {
-    this.wsClient.send(createEnvelope('ui:action', { action }));
+  public sendAction(action: UiActionType, hostId?: string): void {
+    const payload: UiActionPayload = {
+      action,
+    };
+
+    if (hostId) {
+      payload.hostId = hostId;
+    }
+
+    this.wsClient.send(createEnvelope('ui:action', payload));
   }
 }
