@@ -37,9 +37,8 @@ CONFIG_PATH="${CONFIG_DIR}/bridge.mac.json"
 mkdir -p "${CONFIG_DIR}"
 
 if [[ -n "${WINDOWS_HOST:-}" ]]; then
-  node -e "
+  CONFIG_PATH="${CONFIG_PATH}" WINDOWS_HOST="${WINDOWS_HOST}" node -e "
 const fs = require('node:fs');
-const path = require('node:path');
 const config = {
   discoveryType: 'bridgeworkspace',
   windowsHost: process.env.WINDOWS_HOST.trim(),
@@ -48,9 +47,9 @@ const config = {
 const configPath = process.env.CONFIG_PATH;
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
 console.log('Saved config with Windows fallback:', configPath);
-" CONFIG_PATH="${CONFIG_PATH}" WINDOWS_HOST="${WINDOWS_HOST}"
+"
 else
-  node -e "
+  CONFIG_PATH="${CONFIG_PATH}" node -e "
 const fs = require('node:fs');
 const config = {
   discoveryType: 'bridgeworkspace',
@@ -59,7 +58,7 @@ const config = {
 const configPath = process.env.CONFIG_PATH;
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
 console.log('Saved config (auto-discover only):', configPath);
-" CONFIG_PATH="${CONFIG_PATH}"
+"
 fi
 
 echo ""
