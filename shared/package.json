@@ -11,5 +11,8 @@
     "chokidar": "^4.0.3",
     "ps-list": "^9.0.0",
     "ws": "^8.18.1"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.10"
   }
 }

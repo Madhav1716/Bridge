@@ -176,7 +176,7 @@ export class BridgeWebSocketClient extends EventEmitter {
       this.setStatus('CONNECTED');
     });
 
-    socket.on('message', (data) => {
+    socket.on('message', (data: Buffer | Buffer[] | string) => {
       const parsed = parseEnvelope(data.toString());
       if (!parsed) {
         this.logger.warn('Dropped invalid websocket payload from server');
@@ -204,7 +204,7 @@ export class BridgeWebSocketClient extends EventEmitter {
       this.scheduleReconnect();
     });
 
-    socket.on('error', (error) => {
+    socket.on('error', (error: Error) => {
       this.logger.error('WebSocket client error', { error: error.message });
     });
   }

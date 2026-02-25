@@ -237,7 +237,8 @@ if (-not (Test-Path -Path $ProjectPath)) {
 }
 
 if ($EnableRemoteDesktop -and -not (Test-RdpHostSupport)) {
-  throw 'This Windows edition does not support hosting Remote Desktop (RDP). Use Windows Pro/Enterprise for full remote control.'
+  Write-Warning 'This Windows edition does not support hosting Remote Desktop (RDP). Skipping RDP; share and file access will still be configured.'
+  $EnableRemoteDesktop = $false
 }
 
 $shareAccount = 'Everyone'

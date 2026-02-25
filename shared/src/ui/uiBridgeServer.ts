@@ -35,11 +35,11 @@ export class UiBridgeServer extends EventEmitter {
 
     this.server = new WebSocketServer({ host: '127.0.0.1', port });
 
-    this.server.on('connection', (socket) => {
+    this.server.on('connection', (socket: WebSocket) => {
       this.clients.add(socket);
       this.pushStatus(socket);
 
-      socket.on('message', (raw) => {
+      socket.on('message', (raw: Buffer | Buffer[] | string) => {
         const message = parseEnvelope(raw.toString());
         if (!message || message.type !== 'ui:action') {
           return;
@@ -57,12 +57,12 @@ export class UiBridgeServer extends EventEmitter {
         this.clients.delete(socket);
       });
 
-      socket.on('error', (error) => {
+      socket.on('error', (error: Error) => {
         this.logger.error('UI bridge socket error', { error: error.message });
       });
     });
 
-    this.server.on('error', (error) => {
+    this.server.on('error', (error: Error) => {
       this.logger.error('UI bridge server error', { error: error.message });
     });
 

@@ -27,7 +27,7 @@ export class BridgeWebSocketServer extends EventEmitter {
 
     this.server = new WebSocketServer({ host, port });
 
-    this.server.on('connection', (socket) => {
+    this.server.on('connection', (socket: WebSocket) => {
       const clientId = this.nextClientId;
       this.nextClientId += 1;
       this.clients.set(clientId, socket);
@@ -35,7 +35,7 @@ export class BridgeWebSocketServer extends EventEmitter {
       this.emit('clientsChanged', this.clients.size);
       this.emit('clientConnected', clientId);
 
-      socket.on('message', (data) => {
+      socket.on('message', (data: Buffer | Buffer[] | string) => {
         const parsed = parseEnvelope(data.toString());
         if (!parsed) {
           this.logger.warn('Dropped invalid websocket payload', {
@@ -54,7 +54,7 @@ export class BridgeWebSocketServer extends EventEmitter {
         this.emit('clientDisconnected', clientId);
       });
 
-      socket.on('error', (error) => {
+      socket.on('error', (error: Error) => {
         this.logger.error('WebSocket client error', {
           clientId,
           error: error.message,
@@ -62,7 +62,7 @@ export class BridgeWebSocketServer extends EventEmitter {
       });
     });
 
-    this.server.on('error', (error) => {
+    this.server.on('error', (error: Error) => {
       this.logger.error('WebSocket server error', { error: error.message });
     });
 
