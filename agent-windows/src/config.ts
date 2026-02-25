@@ -1,5 +1,24 @@
+import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+interface WindowsConfigFile {
+  wsPort?: number;
+  discoveryType?: string;
+  projectPath?: string;
+  sharedWindowsRoot?: string;
+  windowsProjectRoot?: string;
+  shareName?: string;
+  statePath?: string;
+  processPollMs?: number;
+  heartbeatMs?: number;
+  heartbeatTimeoutMs?: number;
+  commandTimeoutMs?: number;
+  allowedCommands?: string[] | string;
+  hostId?: string;
+  hostName?: string;
+  openFiles?: string[] | string;
+}
 
 export interface WindowsAgentConfig {
   wsPort: number;
@@ -27,42 +46,124 @@ function toNumber(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function loadWindowsAgentConfig(): WindowsAgentConfig {
-  const projectPath = process.env.BRIDGE_PROJECT_PATH ?? process.cwd();
-  const sharedWindowsRoot =
-    process.env.BRIDGE_WINDOWS_PROJECT_ROOT ?? projectPath;
-  const statePath =
-    process.env.BRIDGE_WINDOWS_STATE_PATH ??
-    path.join(os.homedir(), '.bridge', 'windows-state.json');
+function toNumberFromUnknown(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
 
-  const openFilesRaw = process.env.BRIDGE_OPEN_FILES ?? '';
-  const allowedCommandsRaw =
-    process.env.BRIDGE_ALLOWED_COMMANDS ??
-    'npm,pnpm,yarn,node,npx,git,python,pytest,dotnet,cargo,go';
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
 
-  const mockOpenFiles = openFilesRaw
+  return fallback;
+}
+
+function toStringArray(value: string[] | string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+
+  return value
     .split(',')
     .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => (path.isAbsolute(item) ? item : path.join(projectPath, item)));
+    .filter((item) => item.length > 0);
+}
+
+function loadWindowsConfigFile(): WindowsConfigFile {
+  const candidates = [
+    process.env.BRIDGE_WINDOWS_CONFIG_PATH,
+    path.join(process.cwd(), 'bridge.windows.json'),
+    path.join(os.homedir(), '.bridge', 'bridge.windows.json'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+
+    try {
+      const raw = readFileSync(candidate, 'utf8');
+      const parsed = JSON.parse(raw) as WindowsConfigFile;
+      return parsed;
+    } catch {
+      continue;
+    }
+  }
+
+  return {};
+}
+
+export function loadWindowsAgentConfig(): WindowsAgentConfig {
+  const fileConfig = loadWindowsConfigFile();
+
+  const projectPath =
+    process.env.BRIDGE_PROJECT_PATH ?? fileConfig.projectPath ?? process.cwd();
+  const sharedWindowsRoot =
+    process.env.BRIDGE_WINDOWS_PROJECT_ROOT ??
+    fileConfig.windowsProjectRoot ??
+    fileConfig.sharedWindowsRoot ??
+    projectPath;
+
+  const statePath =
+    process.env.BRIDGE_WINDOWS_STATE_PATH ??
+    fileConfig.statePath ??
+    path.join(os.homedir(), '.bridge', 'windows-state.json');
+
+  const openFilesRaw = process.env.BRIDGE_OPEN_FILES;
+  const fileOpenFiles = toStringArray(fileConfig.openFiles);
+  const mockOpenFiles = (openFilesRaw
+    ? toStringArray(openFilesRaw)
+    : fileOpenFiles
+  ).map((item) => (path.isAbsolute(item) ? item : path.join(projectPath, item)));
+
+  const allowedCommandsRaw = process.env.BRIDGE_ALLOWED_COMMANDS;
+  const fileAllowedCommands = toStringArray(fileConfig.allowedCommands);
+  const allowedCommands = (allowedCommandsRaw
+    ? toStringArray(allowedCommandsRaw)
+    : fileAllowedCommands.length > 0
+      ? fileAllowedCommands
+      : ['npm', 'pnpm', 'yarn', 'node', 'npx', 'git', 'python', 'pytest', 'dotnet', 'cargo', 'go']
+  ).map((command) => command.trim().toLowerCase());
 
   return {
-    wsPort: toNumber(process.env.BRIDGE_WS_PORT, 47831),
-    discoveryType: process.env.BRIDGE_DISCOVERY_TYPE ?? 'bridgeworkspace',
+    wsPort:
+      process.env.BRIDGE_WS_PORT !== undefined
+        ? toNumber(process.env.BRIDGE_WS_PORT, 47831)
+        : toNumberFromUnknown(fileConfig.wsPort, 47831),
+    discoveryType:
+      process.env.BRIDGE_DISCOVERY_TYPE ??
+      fileConfig.discoveryType ??
+      'bridgeworkspace',
     projectPath,
     sharedWindowsRoot,
-    shareName: process.env.BRIDGE_SHARE_NAME,
+    shareName: process.env.BRIDGE_SHARE_NAME ?? fileConfig.shareName,
     statePath,
-    processPollMs: toNumber(process.env.BRIDGE_PROCESS_POLL_MS, 5000),
-    heartbeatMs: toNumber(process.env.BRIDGE_HEARTBEAT_MS, 4000),
-    heartbeatTimeoutMs: toNumber(process.env.BRIDGE_HEARTBEAT_TIMEOUT_MS, 12000),
-    commandTimeoutMs: toNumber(process.env.BRIDGE_COMMAND_TIMEOUT_MS, 900000),
-    allowedCommands: allowedCommandsRaw
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean),
-    hostId: process.env.BRIDGE_HOST_ID ?? os.hostname(),
-    hostName: process.env.BRIDGE_HOST_NAME ?? os.hostname(),
+    processPollMs:
+      process.env.BRIDGE_PROCESS_POLL_MS !== undefined
+        ? toNumber(process.env.BRIDGE_PROCESS_POLL_MS, 5000)
+        : toNumberFromUnknown(fileConfig.processPollMs, 5000),
+    heartbeatMs:
+      process.env.BRIDGE_HEARTBEAT_MS !== undefined
+        ? toNumber(process.env.BRIDGE_HEARTBEAT_MS, 4000)
+        : toNumberFromUnknown(fileConfig.heartbeatMs, 4000),
+    heartbeatTimeoutMs:
+      process.env.BRIDGE_HEARTBEAT_TIMEOUT_MS !== undefined
+        ? toNumber(process.env.BRIDGE_HEARTBEAT_TIMEOUT_MS, 12000)
+        : toNumberFromUnknown(fileConfig.heartbeatTimeoutMs, 12000),
+    commandTimeoutMs:
+      process.env.BRIDGE_COMMAND_TIMEOUT_MS !== undefined
+        ? toNumber(process.env.BRIDGE_COMMAND_TIMEOUT_MS, 900000)
+        : toNumberFromUnknown(fileConfig.commandTimeoutMs, 900000),
+    allowedCommands,
+    hostId: process.env.BRIDGE_HOST_ID ?? fileConfig.hostId ?? os.hostname(),
+    hostName: process.env.BRIDGE_HOST_NAME ?? fileConfig.hostName ?? os.hostname(),
     mockOpenFiles,
   };
 }

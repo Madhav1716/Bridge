@@ -1,0 +1,21 @@
+{
+  "projectPath": "D:/Bridge/Bridge/agent-windows",
+  "windowsProjectRoot": "D:/Bridge/Bridge",
+  "shareName": "BridgeShare",
+  "hostId": "ASUS",
+  "hostName": "Asus",
+  "discoveryType": "bridgeworkspace",
+  "allowedCommands": [
+    "npm",
+    "pnpm",
+    "yarn",
+    "node",
+    "npx",
+    "git",
+    "python",
+    "pytest",
+    "dotnet",
+    "cargo",
+    "go"
+  ]
+}

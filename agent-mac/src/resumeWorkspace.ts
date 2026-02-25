@@ -50,10 +50,6 @@ function isWindowsPath(value: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(value);
 }
 
-function normalizeWindowsPath(value: string): string {
-  return value.replace(/\//g, '\\').replace(/\\+$/g, '').toLowerCase();
-}
-
 function parseSmbRoot(smbRoot: string): ParsedSmbRoot | null {
   if (!smbRoot.startsWith('smb://')) {
     return null;
@@ -100,6 +96,7 @@ function deriveMountRoot(accessOptions: ResumeAccessOptions): string | null {
 function toWindowsSegments(value: string): string[] {
   return value
     .replace(/\//g, '\\')
+    .replace(/\\+/g, '\\')
     .split('\\')
     .filter((segment) => segment.length > 0);
 }
@@ -113,10 +110,16 @@ function mapWindowsPathToMountedPath(
     return null;
   }
 
-  const normalizedPath = normalizeWindowsPath(windowsPath);
-  const normalizedRoot = normalizeWindowsPath(mapping.windowsRoot);
-  if (!normalizedPath.startsWith(normalizedRoot)) {
+  const sourceSegments = toWindowsSegments(windowsPath);
+  const rootSegments = toWindowsSegments(mapping.windowsRoot);
+  if (rootSegments.length === 0 || sourceSegments.length < rootSegments.length) {
     return null;
+  }
+
+  for (let index = 0; index < rootSegments.length; index += 1) {
+    if (sourceSegments[index].toLowerCase() !== rootSegments[index].toLowerCase()) {
+      return null;
+    }
   }
 
   const smbParsed = parseSmbRoot(mapping.smbRoot);
@@ -125,10 +128,7 @@ function mapWindowsPathToMountedPath(
     return null;
   }
 
-  const sourcePath = windowsPath.replace(/\//g, '\\');
-  const sourceRoot = mapping.windowsRoot.replace(/\//g, '\\').replace(/\\+$/g, '');
-  const relativeRaw = sourcePath.slice(sourceRoot.length).replace(/^\\+/, '');
-  const relativeSegments = toWindowsSegments(relativeRaw);
+  const relativeSegments = sourceSegments.slice(rootSegments.length);
 
   return path.join(mountRoot, ...smbParsed.shareSubPath, ...relativeSegments);
 }

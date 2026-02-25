@@ -16,6 +16,44 @@ npm run build
 2. Ensure Mac can open `smb://<WINDOWS_IP>/BridgeShare`.
 3. Ensure Windows firewall allows File and Printer Sharing.
 
+### One-command setup (recommended)
+
+Mac:
+```bash
+cd /Users/maddy/Development/Bridge
+npm run setup:mac
+```
+
+Windows (Administrator PowerShell):
+```powershell
+cd D:\Bridge\Bridge
+npm run setup:windows
+```
+
+For simplest onboarding, pick `everyone` when setup asks for permission mode.
+
+### One-time config files (recommended)
+
+This avoids repeated `export`/`set` commands every run.
+
+Mac:
+```bash
+cd /Users/maddy/Development/Bridge
+cp bridge.mac.example.json bridge.mac.json
+```
+Edit `bridge.mac.json` once with your real IP/share/path.
+
+Windows:
+```bat
+cd D:\Bridge\Bridge
+copy bridge.windows.example.json bridge.windows.json
+```
+Edit `bridge.windows.json` once with your real paths.
+
+After that, start commands are simple:
+- Windows: `npm run start:windows`
+- Mac (agent + tray): `npm run start:mac:all`
+
 ## 2) Quick sync from Mac -> Windows (repeatable)
 
 Use this on Mac to copy latest code to Windows mounted share:
@@ -56,6 +94,11 @@ set BRIDGE_COMMAND_TIMEOUT_MS=900000
 npm run start:windows
 ```
 
+If `bridge.windows.json` exists, you can skip all `set` lines and run only:
+```bat
+npm run start:windows
+```
+
 ## 4) Start Mac agent
 
 Run on Mac:
@@ -64,18 +107,25 @@ Run on Mac:
 cd /Users/maddy/Development/Bridge
 export BRIDGE_DISCOVERY_TYPE=bridgeworkspace
 export BRIDGE_WINDOWS_COMMAND='npm -v'
-export BRIDGE_WINDOWS_COMMAND_CWD='D:\\Bridge\\Bridge\\agent-windows'
+export BRIDGE_WINDOWS_COMMAND_CWD='D:/Bridge/Bridge/agent-windows'
 npm run start:mac
+```
+
+If `bridge.mac.json` exists, you can skip all `export` lines and run only:
+```bash
+npm run start:mac:all
 ```
 
 If auto-mapping is not available, set manual mapping:
 ```bash
-export BRIDGE_WINDOWS_PROJECT_ROOT='D:\\Bridge\\Bridge'
+export BRIDGE_WINDOWS_PROJECT_ROOT='D:/Bridge/Bridge'
 export BRIDGE_SMB_ROOT='smb://<WINDOWS_IP>/BridgeShare'
 export BRIDGE_SMB_MOUNT_ROOT='/Volumes/BridgeShare'
 ```
 
 ## 5) Start tray UI (Mac)
+
+Skip this step if you used `npm run start:mac:all`.
 
 ```bash
 cd /Users/maddy/Development/Bridge

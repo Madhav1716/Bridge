@@ -144,7 +144,62 @@ npm install
 npm run build
 ```
 
+## Easier Startup (One-Time Config Files)
+
+You can avoid repeated env vars with one-time setup scripts.
+
+Mac setup:
+```bash
+cd /Users/maddy/Development/Bridge
+npm run setup:mac
+```
+
+Windows setup (run in Administrator PowerShell):
+```powershell
+cd D:\Bridge\Bridge
+npm run setup:windows
+```
+
+When prompted for permission mode, choose `everyone` for easiest first-time setup (no dedicated SMB user required).
+
+These scripts:
+- create/update local config files (`bridge.mac.json`, `bridge.windows.json`)
+- prepare SMB path settings
+- prepare one-time share permissions/firewall rules on Windows
+- trigger the first SMB mount prompt on Mac
+- let Mac setup optionally store SMB username in `smb://user@host/share` format
+
+Daily run after setup:
+- Windows: `npm run start:windows`
+- Mac (agent + tray together): `npm run start:mac:all`
+
+You can also create configs manually:
+
+Mac manual:
+1. Copy [bridge.mac.example.json](/Users/maddy/Development/Bridge/bridge.mac.example.json) to `bridge.mac.json`.
+2. Update `windowsProjectRoot`, `smbRoot`, and `smbMountRoot`.
+3. Start with `npm run start:mac`.
+
+Windows manual:
+1. Copy [bridge.windows.example.json](/Users/maddy/Development/Bridge/bridge.windows.example.json) to `bridge.windows.json`.
+2. Update `projectPath`, `windowsProjectRoot`, and `shareName`.
+3. Start with `npm run start:windows`.
+
+Environment variables still work and override config file values.
+
 ## Run
+
+### Recommended Daily Start (after one-time setup)
+
+Windows:
+```bat
+npm run start:windows
+```
+
+Mac:
+```bash
+npm run start:mac:all
+```
 
 ### 1. Start Windows Agent (on Windows machine)
 
@@ -174,6 +229,11 @@ cd /Users/maddy/Development/Bridge
 export BRIDGE_WINDOWS_PROJECT_ROOT='C:\path\to\project-root'
 export BRIDGE_SMB_ROOT='smb://WINDOWS-HOST/Shared/project-root'
 npm run start:mac
+```
+
+Or start Mac agent + tray in one command:
+```bash
+npm run start:mac:all
 ```
 
 Optional environment variables:
@@ -234,4 +294,3 @@ The tray status line shows command state (`Idle`, `Running`, `Succeeded`, `Faile
 - This MVP intentionally reconstructs state only; it does not migrate running processes.
 - File sync is intentionally not implemented; use SMB/native sharing.
 - Autostart registration is represented by explicit placeholder hooks in both agents.
-# Bridge
