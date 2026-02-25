@@ -164,6 +164,10 @@ async function main(): Promise<void> {
       hostId: config.hostId,
       shareName: config.shareName ?? '',
       windowsRoot: config.sharedWindowsRoot,
+      remoteControl: config.remoteControlEnabled ? '1' : '0',
+      remoteProtocol: config.remoteProtocol,
+      remotePort: String(config.remotePort),
+      remoteUsername: config.remoteUsername ?? '',
     },
   });
 

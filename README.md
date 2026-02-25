@@ -24,6 +24,7 @@ No cloud, no custom file sync, no dashboard.
 │       ├── commandRequest.ts
 │       ├── config.ts
 │       ├── index.ts
+│       ├── remoteControl.ts
 │       └── resumeWorkspace.ts
 ├── shared
 │   └── src
@@ -128,13 +129,15 @@ Decision:
 
 Includes:
 - Connection/host/project/last-event status
-- Quick actions: reconnect, pause/resume, open project folder, resume workspace, run/cancel Windows command
+- Quick actions: reconnect, pause/resume, open project folder, resume workspace, control Windows (RDP), run/cancel Windows command
 
 ## Prerequisites
 
 - Node.js 20+
 - Windows and Mac on the same LAN
 - Native shared folder (SMB) configured so Mac can access the Windows project directory
+- For full Windows control from Mac tray: `Windows App` or `Microsoft Remote Desktop` on macOS
+- For RDP hosting on Windows: Pro/Enterprise edition (Windows Home does not host RDP)
 
 ## Build
 
@@ -168,6 +171,7 @@ These scripts:
 - prepare one-time share permissions/firewall rules on Windows
 - trigger the first SMB mount prompt on Mac
 - let Mac setup optionally store SMB username in `smb://user@host/share` format
+- enable Windows Remote Desktop and publish RDP metadata for tray-based remote control
 
 Daily run after setup:
 - Windows: `npm run start:windows`
@@ -282,6 +286,19 @@ Set the default command on Mac agent before startup:
 ```bash
 export BRIDGE_WINDOWS_COMMAND='npm -v'
 ```
+
+### 5. Full Windows Control (from Mac tray)
+
+After both agents + tray are running:
+1. Click `Control Windows (Remote)` in the tray menu.
+2. Bridge opens an RDP session to the discovered Windows host.
+3. Log in with Windows credentials if prompted.
+
+Remote control metadata can also be configured manually in [bridge.windows.example.json](/Users/maddy/Development/Bridge/bridge.windows.example.json):
+- `remoteControlEnabled` (default `true`)
+- `remoteProtocol` (`rdp`)
+- `remotePort` (default `3389`)
+- `remoteUsername` (optional prefill)
 
 Then in tray:
 - Click `Run Windows Command` to execute on Windows host.

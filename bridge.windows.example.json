@@ -5,6 +5,10 @@
   "hostId": "ASUS",
   "hostName": "Asus",
   "discoveryType": "bridgeworkspace",
+  "remoteControlEnabled": true,
+  "remoteProtocol": "rdp",
+  "remotePort": 3389,
+  "remoteUsername": "ASUS\\bridgeuser",
   "allowedCommands": [
     "npm",
     "pnpm",

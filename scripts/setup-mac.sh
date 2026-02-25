@@ -80,6 +80,13 @@ echo
 echo "Triggering SMB mount prompt (accept once and save in Keychain)..."
 open "${SMB_ROOT}" || true
 
+if ! open -Ra "Windows App" >/dev/null 2>&1 && ! open -Ra "Microsoft Remote Desktop" >/dev/null 2>&1; then
+  echo
+  echo "For full Windows control from Bridge tray, install one of:"
+  echo "  - Windows App (Microsoft)"
+  echo "  - Microsoft Remote Desktop"
+fi
+
 echo
 echo "Setup done. Next runs are simple:"
 echo "  npm run start:mac:all"

@@ -9,6 +9,10 @@ interface WindowsConfigFile {
   sharedWindowsRoot?: string;
   windowsProjectRoot?: string;
   shareName?: string;
+  remoteControlEnabled?: boolean | string;
+  remoteProtocol?: string;
+  remotePort?: number | string;
+  remoteUsername?: string;
   statePath?: string;
   processPollMs?: number;
   heartbeatMs?: number;
@@ -26,6 +30,10 @@ export interface WindowsAgentConfig {
   projectPath: string;
   sharedWindowsRoot: string;
   shareName?: string;
+  remoteControlEnabled: boolean;
+  remoteProtocol: 'rdp';
+  remotePort: number;
+  remoteUsername?: string;
   statePath: string;
   processPollMs: number;
   heartbeatMs: number;
@@ -54,6 +62,35 @@ function toNumberFromUnknown(value: unknown, fallback: number): number {
   if (typeof value === 'string') {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  return fallback;
+}
+
+function toBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes') {
+    return true;
+  }
+
+  if (normalized === '0' || normalized === 'false' || normalized === 'no') {
+    return false;
+  }
+
+  return fallback;
+}
+
+function toBooleanFromUnknown(value: unknown, fallback: boolean): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return toBoolean(value, fallback);
   }
 
   return fallback;
@@ -116,6 +153,20 @@ export function loadWindowsAgentConfig(): WindowsAgentConfig {
     fileConfig.statePath ??
     path.join(os.homedir(), '.bridge', 'windows-state.json');
 
+  const remoteControlEnabled =
+    process.env.BRIDGE_REMOTE_CONTROL_ENABLED !== undefined
+      ? toBoolean(process.env.BRIDGE_REMOTE_CONTROL_ENABLED, true)
+      : toBooleanFromUnknown(fileConfig.remoteControlEnabled, true);
+
+  const remotePort =
+    process.env.BRIDGE_REMOTE_PORT !== undefined
+      ? toNumber(process.env.BRIDGE_REMOTE_PORT, 3389)
+      : toNumberFromUnknown(fileConfig.remotePort, 3389);
+
+  const remoteProtocolRaw =
+    process.env.BRIDGE_REMOTE_PROTOCOL ?? fileConfig.remoteProtocol ?? 'rdp';
+  const remoteProtocol = remoteProtocolRaw.toLowerCase() === 'rdp' ? 'rdp' : 'rdp';
+
   const openFilesRaw = process.env.BRIDGE_OPEN_FILES;
   const fileOpenFiles = toStringArray(fileConfig.openFiles);
   const mockOpenFiles = (openFilesRaw
@@ -144,6 +195,10 @@ export function loadWindowsAgentConfig(): WindowsAgentConfig {
     projectPath,
     sharedWindowsRoot,
     shareName: process.env.BRIDGE_SHARE_NAME ?? fileConfig.shareName,
+    remoteControlEnabled,
+    remoteProtocol,
+    remotePort,
+    remoteUsername: process.env.BRIDGE_REMOTE_USERNAME ?? fileConfig.remoteUsername,
     statePath,
     processPollMs:
       process.env.BRIDGE_PROCESS_POLL_MS !== undefined

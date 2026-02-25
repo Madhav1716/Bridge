@@ -135,6 +135,13 @@ function buildMenu(): Electron.Menu {
       },
     },
     {
+      label: 'Control Windows (Remote)',
+      enabled: status.connectionStatus === 'CONNECTED',
+      click: () => {
+        uiClient.sendAction('open-remote-control');
+      },
+    },
+    {
       label: 'Reconnect',
       click: () => {
         uiClient.sendAction('reconnect');

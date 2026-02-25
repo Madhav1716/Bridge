@@ -153,6 +153,11 @@ npm run start:tray
 2. Command state changes to `Running`, then `Succeeded` (or `Failed` with exit).
 3. Click `Cancel Windows Command` during a long command and confirm `Cancelled`.
 
+### E) Full Windows control from Mac
+1. Click `Control Windows (Remote)` in tray.
+2. Confirm RDP client opens and connects to Windows host.
+3. Verify you can control Windows desktop (keyboard + mouse) from Mac.
+
 ## 7) Fast retest loop
 
 1. Edit code on Mac.
@@ -176,3 +181,9 @@ npm run start:tray
 Set either:
 1. Windows share metadata (`BRIDGE_SHARE_NAME` + `BRIDGE_WINDOWS_PROJECT_ROOT`) on host, or
 2. Manual Mac mapping (`BRIDGE_WINDOWS_PROJECT_ROOT` + `BRIDGE_SMB_ROOT`).
+
+### Remote control action fails
+1. Install `Windows App` or `Microsoft Remote Desktop` on Mac.
+2. Re-run Windows setup so Remote Desktop + firewall are enabled: `npm run setup:windows`.
+3. Confirm Windows is reachable on RDP port `3389` in the same LAN.
+4. Confirm Windows host edition supports RDP server (Pro/Enterprise).

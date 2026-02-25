@@ -23,6 +23,7 @@ import {
   resumeWorkspace,
   ResumeAccessOptions,
 } from './resumeWorkspace';
+import { openRemoteControlSession } from './remoteControl';
 
 function deriveAutoMapping(
   service: BridgeServiceRecord | null,
@@ -651,6 +652,11 @@ async function handleUiAction(
   if (action === 'resume') {
     wsClient.setPaused(false);
     await connectToSelectedService();
+    return;
+  }
+
+  if (action === 'open-remote-control') {
+    await openRemoteControlSession(logger, selectedService);
     return;
   }
 

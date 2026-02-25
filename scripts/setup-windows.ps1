@@ -6,6 +6,10 @@ param(
   [string]$HostId = $env:COMPUTERNAME,
   [string]$BridgeUser = 'bridgeuser',
   [string]$BridgePassword = 'Bridge@12345',
+  [bool]$EnableRemoteDesktop = $true,
+  [int]$RemotePort = 3389,
+  [string]$RemoteProtocol = 'rdp',
+  [string]$RemoteUsername = '',
   [switch]$UseEveryone,
   [switch]$NoPrompt
 )
@@ -88,6 +92,37 @@ function Enable-FileSharingFirewall {
   Assert-ExitCode 'Enabling File and Printer Sharing firewall rules'
 }
 
+function Enable-RemoteDesktopAccess {
+  Set-ItemProperty `
+    -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+    -Name 'fDenyTSConnections' `
+    -Value 0
+
+  & netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes > $null
+  Assert-ExitCode 'Enabling Remote Desktop firewall rules'
+}
+
+function Ensure-RemoteDesktopUser {
+  param(
+    [string]$Account
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Account)) {
+    return
+  }
+
+  try {
+    Add-LocalGroupMember -Group 'Remote Desktop Users' -Member $Account -ErrorAction Stop
+    return
+  } catch {
+    if ($_.Exception.Message -match 'already') {
+      return
+    }
+  }
+
+  cmd /c "net localgroup `"Remote Desktop Users`" `"$Account`" /add >nul 2>&1"
+}
+
 function Write-WindowsConfig {
   param(
     [string]$TargetPath,
@@ -95,7 +130,11 @@ function Write-WindowsConfig {
     [string]$WindowsRoot,
     [string]$Share,
     [string]$Host,
-    [string]$HostIdentifier
+    [string]$HostIdentifier,
+    [bool]$RemoteControlEnabled,
+    [string]$RemoteControlProtocol,
+    [int]$RemoteControlPort,
+    [string]$RemoteControlUsername
   )
 
   $config = [ordered]@{
@@ -105,6 +144,10 @@ function Write-WindowsConfig {
     hostId = $HostIdentifier
     hostName = $Host
     discoveryType = 'bridgeworkspace'
+    remoteControlEnabled = $RemoteControlEnabled
+    remoteProtocol = $RemoteControlProtocol
+    remotePort = $RemoteControlPort
+    remoteUsername = $RemoteControlUsername
     allowedCommands = @('npm', 'pnpm', 'yarn', 'node', 'npx', 'git', 'python', 'pytest', 'dotnet', 'cargo', 'go')
   }
 
@@ -125,6 +168,19 @@ function Try-GetIPv4 {
     return $ip
   } catch {
     return $null
+  }
+}
+
+function Test-RdpHostSupport {
+  try {
+    $edition = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').EditionID
+    if ($edition -like 'Core*') {
+      return $false
+    }
+
+    return $true
+  } catch {
+    return $true
   }
 }
 
@@ -157,6 +213,10 @@ if (-not (Test-Path -Path $ProjectPath)) {
   throw "Project path does not exist: $ProjectPath"
 }
 
+if ($EnableRemoteDesktop -and -not (Test-RdpHostSupport)) {
+  throw 'This Windows edition does not support hosting Remote Desktop (RDP). Use Windows Pro/Enterprise for full remote control.'
+}
+
 $shareAccount = 'Everyone'
 $ntfsAccount = 'Everyone'
 
@@ -170,6 +230,23 @@ Ensure-Share -Share $ShareName -RootPath $WindowsProjectRoot -Account $shareAcco
 Ensure-NtfsAccess -RootPath $WindowsProjectRoot -Account $ntfsAccount
 Enable-FileSharingFirewall
 
+if ([string]::IsNullOrWhiteSpace($RemoteUsername)) {
+  if (-not $UseEveryone) {
+    $RemoteUsername = "$env:COMPUTERNAME\$BridgeUser"
+  } else {
+    $RemoteUsername = "$env:COMPUTERNAME\$env:USERNAME"
+  }
+}
+
+if ($EnableRemoteDesktop) {
+  Enable-RemoteDesktopAccess
+  if (-not $UseEveryone) {
+    Ensure-RemoteDesktopUser -Account $BridgeUser
+  } else {
+    Ensure-RemoteDesktopUser -Account $env:USERNAME
+  }
+}
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir '..')
 $configPath = Join-Path $repoRoot 'bridge.windows.json'
@@ -180,7 +257,11 @@ Write-WindowsConfig `
   -WindowsRoot $WindowsProjectRoot `
   -Share $ShareName `
   -Host $HostName `
-  -HostIdentifier $HostId
+  -HostIdentifier $HostId `
+  -RemoteControlEnabled $EnableRemoteDesktop `
+  -RemoteControlProtocol $RemoteProtocol `
+  -RemoteControlPort $RemotePort `
+  -RemoteControlUsername $RemoteUsername
 
 $ipAddress = Try-GetIPv4
 
@@ -196,6 +277,15 @@ if ($ipAddress) {
 if (-not $UseEveryone) {
   Write-Host "SMB user: $env:COMPUTERNAME\$BridgeUser" -ForegroundColor Green
   Write-Host "SMB password: $BridgePassword" -ForegroundColor Green
+}
+
+if ($EnableRemoteDesktop) {
+  if ($ipAddress) {
+    Write-Host "Remote control target: $ipAddress`:$RemotePort (RDP)" -ForegroundColor Green
+  } else {
+    Write-Host "Remote control target: $env:COMPUTERNAME`:$RemotePort (RDP)" -ForegroundColor Green
+  }
+  Write-Host "Remote login user: $RemoteUsername" -ForegroundColor Green
 }
 
 Write-Host ''

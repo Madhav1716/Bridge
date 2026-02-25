@@ -131,6 +131,7 @@ export type UiActionType =
   | 'resume'
   | 'open-project'
   | 'resume-workspace'
+  | 'open-remote-control'
   | 'run-windows-command'
   | 'cancel-windows-command';
 
