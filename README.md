@@ -67,7 +67,7 @@ No cloud, no custom file sync, no dashboard.
 5. Mac Agent stores latest workspace state locally and exposes a local UI bridge socket.
 6. Tray UI connects to the local UI bridge and shows status/actions only.
 7. `Resume Workspace` on Mac opens the shared project path and attempts to open tracked files.
-8. `Run Windows Command` on Mac sends an allowlisted command to Windows and streams lifecycle events.
+8. Commands and config are kept minimal so setup stays one-time and automatic.
 
 Connection lifecycle model:
 - `DISCONNECTED`
@@ -129,15 +129,12 @@ Decision:
 
 Includes:
 - Connection/host/project/last-event status
-- Quick actions: reconnect, pause/resume, open project folder, resume workspace, control Windows (RDP), pair/forget host, run/cancel Windows command
+- Quick actions: reconnect, pause/resume, open project folder, resume workspace
 
 ## Prerequisites
 
 - Node.js 20+
 - Windows and Mac on the same LAN
-- Native shared folder (SMB) configured so Mac can access the Windows project directory
-- For full Windows control from Mac tray: `Windows App` or `Microsoft Remote Desktop` on macOS
-- For RDP hosting on Windows: Pro/Enterprise edition (Windows Home does not host RDP)
 
 ## Build
 
@@ -147,69 +144,77 @@ npm install
 npm run build
 ```
 
-## Easier Startup (One-Time Config Files)
+## Quick setup (minimal steps)
 
-You can avoid repeated env vars with one-time setup scripts.
+**Goal: one-time setup on each machine, then Bridge runs automatically.**
 
-Mac setup:
+### On Windows (run once as Administrator)
+
+1. Open PowerShell **as Administrator** (right-click → Run as administrator).
+2. Go to the Bridge repo:
+   ```powershell
+   cd D:\Bridge\Bridge
+   ```
+3. Run setup. You’ll get **one question**: which folder to share with Mac (default is the Bridge folder; press Enter, or type e.g. `D:\MyProject`):
+   ```powershell
+   npm run setup:windows
+   ```
+   Or skip the question and use the current folder: `npm run setup:windows:quick`
+4. Start Bridge: `npm run start:windows`  
+   To run the agent and the system-tray icon together: `npm run start:windows:all`. The tray shows status (Hosting / Connected / Paused), project, Mac connected, and quick actions (Pause, Restart, Open Project Folder)—same mental model as the Mac tray.
+
+### On Mac (run once)
+
+1. In the repo (or your project):
+   ```bash
+   cd /path/to/Bridge
+   npm run setup:mac
+   ```
+   You’ll only be asked for a Windows IP if Bridge can’t find your PC automatically (e.g. strict firewall). Press Enter to skip and use auto-discovery.
+2. Start Bridge: `npm run start:mac:all`
+
+**That’s it.** Bridge will find the Windows PC, connect, and remember it. The first time you click **Resume Workspace** or **Open Project Folder** in the tray, macOS may ask you to connect to the Windows folder—approve once and you’re set.
+
+### Daily use
+
+- **Windows:** `npm run start:windows` (or `npm run start:windows:all` for agent + tray)
+- **Mac:** `npm run start:mac:all`
+
+No need to reconfigure or reconnect; Bridge auto-discovers and auto-pairs on first connection.
+
+## How to test
+
+**1. Build once**
+
 ```bash
-cd /Users/maddy/Development/Bridge
-npm run setup:mac
+cd /path/to/Bridge
+npm install
+npm run build
 ```
 
-Mac one-command quick setup (no prompts):
-```bash
-cd /Users/maddy/Development/Bridge
-BRIDGE_WINDOWS_HOST=192.168.29.65 npm run setup:mac:quick
-```
+**2. Test on Mac only** (no Windows needed)
 
-If mDNS discovery is blocked on your LAN, Bridge will use `windowsHost` + `windowsWsPort` as direct fallback.
+- Run: `npm run start:mac:all`
+- You should see: a Bridge icon in the menu bar; tray menu shows **Discovering** or **Disconnected**, Host: Not connected, Project: No project.
+- Click **Quit Bridge** to stop.
 
-Windows setup (run in Administrator PowerShell):
-```powershell
-cd D:\Bridge\Bridge
-npm run setup:windows
-```
+**3. Test on Windows only**
 
-Windows one-command quick setup (no prompts, shares current drive root, enables RDP):
-```powershell
-cd D:\Bridge\Bridge
-npm run setup:windows:quick
-```
+- Run: `npm run start:windows:all` (or run `npm run start:windows` in one terminal and `npm run start:tray` in another).
+- You should see: a Bridge icon in the system tray; tray menu shows **Hosting**, Project: &lt;your project name&gt;, Mac Connected: No.
+- Try **Pause Bridge** → status becomes Paused; **Resume Bridge** → back to Hosting. **Open Project Folder** → opens the project in Explorer. **Quit Bridge** to stop.
 
-When prompted for permission mode, choose `everyone` for easiest first-time setup (no dedicated SMB user required).
+**4. Test full flow (Windows + Mac on same LAN)**
 
-These scripts:
-- create/update local config files (`bridge.mac.json`, `bridge.windows.json`)
-- prepare SMB path settings
-- prepare one-time share permissions/firewall rules on Windows
-- trigger the first SMB mount prompt on Mac
-- let Mac setup optionally store SMB username in `smb://user@host/share` format
-- enable Windows Remote Desktop and publish RDP metadata for tray-based remote control
-- store Windows host fallback (`windowsHost`) so Bridge can connect even when mDNS is blocked
+1. **One-time setup** (if not done): run `npm run setup:windows` (as Admin) on Windows and `npm run setup:mac` on Mac.
+2. **Windows:** `npm run start:windows:all` → tray shows **Hosting**, project name.
+3. **Mac:** `npm run start:mac:all` → within a few seconds the tray should show **Connected**, your Windows host name, and the same project name.
+4. **Mac tray:** click **Resume Workspace** or **Open Project Folder** → macOS may ask once to connect to the Windows share; after that, Finder opens the project (and files if you use Resume Workspace).
+5. **Windows tray:** should show **Connected**, Mac Connected: Yes.
+6. **Mac:** click **Pause** → Mac tray shows Paused; Windows tray still Hosting (Mac disconnected). **Resume** → they connect again.
+7. **Windows:** click **Pause Bridge** → Mac tray goes to Disconnected; **Resume Bridge** on Windows → Mac reconnects.
 
-Daily run after setup:
-- Windows: `npm run start:windows`
-- Mac (agent + tray together): `npm run start:mac:all`
-
-Pairing flow:
-1. Tray lists discovered Windows hosts.
-2. Click a host once to pair it.
-3. Bridge remembers that host and reconnects to it automatically on next launches.
-
-You can also create configs manually:
-
-Mac manual:
-1. Copy [bridge.mac.example.json](/Users/maddy/Development/Bridge/bridge.mac.example.json) to `bridge.mac.json`.
-2. Update `windowsHost`, `windowsWsPort`, `windowsProjectRoot`, `smbRoot`, and `smbMountRoot`.
-3. Start with `npm run start:mac`.
-
-Windows manual:
-1. Copy [bridge.windows.example.json](/Users/maddy/Development/Bridge/bridge.windows.example.json) to `bridge.windows.json`.
-2. Update `projectPath`, `windowsProjectRoot`, and `shareName`.
-3. Start with `npm run start:windows`.
-
-Environment variables still work and override config file values.
+If something fails: check both machines are on the same LAN, no firewall blocking ports 47831 (WebSocket) or mDNS; on Mac, `bridge.mac.json` can optionally set `windowsHost` to the Windows IP if discovery doesn’t find it.
 
 ## Run
 

@@ -11,6 +11,7 @@
   "scripts": {
     "build": "npm run build --workspace shared && npm run build --workspace agent-windows && npm run build --workspace agent-mac && npm run build --workspace ui-tray",
     "start:windows": "npm run start --workspace agent-windows",
+    "start:windows:all": "powershell -ExecutionPolicy Bypass -File ./scripts/start-windows-all.ps1",
     "start:mac": "npm run start --workspace agent-mac",
     "start:tray": "npm run start --workspace ui-tray",
     "start:mac:all": "bash ./scripts/start-mac-all.sh",

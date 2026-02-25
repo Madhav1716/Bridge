@@ -1,17 +1,6 @@
 param(
-  [string]$ProjectPath = 'D:\Bridge\Bridge\agent-windows',
-  [string]$WindowsProjectRoot = 'D:\Bridge\Bridge',
+  [string]$ProjectPath = '',
   [string]$ShareName = 'BridgeShare',
-  [string]$HostName = $env:COMPUTERNAME,
-  [string]$HostId = $env:COMPUTERNAME,
-  [string]$BridgeUser = 'bridgeuser',
-  [string]$BridgePassword = 'Bridge@12345',
-  [bool]$EnableRemoteDesktop = $true,
-  [int]$RemotePort = 3389,
-  [string]$RemoteProtocol = 'rdp',
-  [string]$RemoteUsername = '',
-  [switch]$UseEveryone,
-  [switch]$NoPrompt,
   [switch]$Quick
 )
 
@@ -19,16 +8,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Read-WithDefault {
-  param(
-    [string]$Prompt,
-    [string]$DefaultValue
-  )
-
+  param([string]$Prompt, [string]$DefaultValue)
   $inputValue = Read-Host "$Prompt [$DefaultValue]"
-  if ([string]::IsNullOrWhiteSpace($inputValue)) {
-    return $DefaultValue
-  }
-
+  if ([string]::IsNullOrWhiteSpace($inputValue)) { return $DefaultValue }
   return $inputValue.Trim()
 }
 
@@ -39,279 +21,94 @@ function Test-IsAdmin {
 }
 
 function Assert-Admin {
-  if (Test-IsAdmin) {
-    return
-  }
-
-  throw 'Run setup-windows.ps1 as Administrator.'
+  if (-not (Test-IsAdmin)) { throw 'Run this script as Administrator (right-click → Run as administrator).' }
 }
 
-function Assert-ExitCode {
-  param([string]$Step)
+function Assert-ExitCode { param([string]$Step) if ($LASTEXITCODE -ne 0) { throw "$Step failed." } }
 
-  if ($LASTEXITCODE -ne 0) {
-    throw "$Step failed with exit code $LASTEXITCODE"
-  }
-}
-
-function Ensure-LocalUser {
-  param(
-    [string]$UserName,
-    [string]$Password
-  )
-
-  cmd /c "net user $UserName >nul 2>&1"
-  if ($LASTEXITCODE -eq 0) {
-    cmd /c "net user $UserName $Password >nul"
-    Assert-ExitCode "Updating local user password for $UserName"
-    return
-  }
-
-  cmd /c "net user $UserName $Password /add >nul"
-  Assert-ExitCode "Creating local user $UserName"
-}
-
-function Ensure-Share {
-  param(
-    [string]$Share,
-    [string]$RootPath,
-    [string]$Account
-  )
-
+function Ensure-Share { param([string]$Share, [string]$RootPath, [string]$Account)
   cmd /c "net share $Share /delete /y >nul 2>&1"
   cmd /c "net share $Share=`"$RootPath`" /grant:$Account,CHANGE >nul"
-  Assert-ExitCode "Creating SMB share $Share"
+  Assert-ExitCode "Creating share $Share"
 }
 
-function Ensure-NtfsAccess {
-  param(
-    [string]$RootPath,
-    [string]$Account
-  )
-
+function Ensure-NtfsAccess { param([string]$RootPath, [string]$Account)
   & icacls $RootPath /grant "${Account}:(OI)(CI)M" /T /C > $null
-  Assert-ExitCode "Setting NTFS permissions for $Account"
+  Assert-ExitCode "Setting permissions"
 }
 
 function Enable-FileSharingFirewall {
   & netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes > $null
-  Assert-ExitCode 'Enabling File and Printer Sharing firewall rules'
+  Assert-ExitCode 'Enabling firewall for file sharing'
 }
 
-function Enable-RemoteDesktopAccess {
-  Set-ItemProperty `
-    -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-    -Name 'fDenyTSConnections' `
-    -Value 0
-
-  & netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes > $null
-  Assert-ExitCode 'Enabling Remote Desktop firewall rules'
-}
-
-function Ensure-RemoteDesktopUser {
-  param(
-    [string]$Account
-  )
-
-  if ([string]::IsNullOrWhiteSpace($Account)) {
-    return
-  }
-
-  try {
-    Add-LocalGroupMember -Group 'Remote Desktop Users' -Member $Account -ErrorAction Stop
-    return
-  } catch {
-    if ($_.Exception.Message -match 'already') {
-      return
-    }
-  }
-
-  cmd /c "net localgroup `"Remote Desktop Users`" `"$Account`" /add >nul 2>&1"
-}
-
-function Write-WindowsConfig {
-  param(
-    [string]$TargetPath,
-    [string]$Project,
-    [string]$WindowsRoot,
-    [string]$Share,
-    [string]$Host,
-    [string]$HostIdentifier,
-    [bool]$RemoteControlEnabled,
-    [string]$RemoteControlProtocol,
-    [int]$RemoteControlPort,
-    [string]$RemoteControlUsername
-  )
-
-  $config = [ordered]@{
+function Write-WindowsConfig { param([string]$TargetPath, [string]$Project, [string]$WindowsRoot, [string]$Share, [string]$HostName, [string]$HostId)
+  $config = @{
     projectPath = $Project
     windowsProjectRoot = $WindowsRoot
     shareName = $Share
-    hostId = $HostIdentifier
-    hostName = $Host
+    hostId = $HostId
+    hostName = $HostName
     discoveryType = 'bridgeworkspace'
-    remoteControlEnabled = $RemoteControlEnabled
-    remoteProtocol = $RemoteControlProtocol
-    remotePort = $RemoteControlPort
-    remoteUsername = $RemoteControlUsername
+    remoteControlEnabled = $false
+    remoteProtocol = 'rdp'
+    remotePort = 3389
+    remoteUsername = ''
     allowedCommands = @('npm', 'pnpm', 'yarn', 'node', 'npx', 'git', 'python', 'pytest', 'dotnet', 'cargo', 'go')
-  }
-
-  $json = $config | ConvertTo-Json -Depth 5
-  Set-Content -Path $TargetPath -Value $json -Encoding UTF8
+  } | ConvertTo-Json -Depth 5
+  Set-Content -Path $TargetPath -Value $config -Encoding UTF8
 }
 
-function Try-GetIPv4 {
-  try {
-    $ip = Get-NetIPAddress -AddressFamily IPv4 |
-      Where-Object {
-        $_.IPAddress -notlike '169.254*' -and
-        $_.IPAddress -ne '127.0.0.1' -and
-        $_.PrefixOrigin -ne 'WellKnown'
-      } |
-      Select-Object -First 1 -ExpandProperty IPAddress
-
-    return $ip
-  } catch {
-    return $null
-  }
-}
-
-function Test-RdpHostSupport {
-  try {
-    $edition = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').EditionID
-    if ($edition -like 'Core*') {
-      return $false
-    }
-
-    return $true
-  } catch {
-    return $true
-  }
-}
-
-Write-Host 'Bridge Windows one-time setup' -ForegroundColor Cyan
-
-if ($Quick) {
-  $NoPrompt = $true
-  $UseEveryone = $true
-
-  if ([string]::IsNullOrWhiteSpace($WindowsProjectRoot) -or $WindowsProjectRoot -eq 'D:\Bridge\Bridge') {
-    try {
-      $repoPath = (Resolve-Path .).Path
-      $driveRoot = Split-Path -Qualifier $repoPath
-      if (-not [string]::IsNullOrWhiteSpace($driveRoot)) {
-        $WindowsProjectRoot = $driveRoot
-      }
-    } catch {
-      # keep current default
-    }
-  }
-}
-
-if (-not $NoPrompt) {
-  $WindowsProjectRoot = Read-WithDefault 'Windows shared project root' $WindowsProjectRoot
-  $ProjectPath = Read-WithDefault 'Bridge active project path' $ProjectPath
-  $ShareName = Read-WithDefault 'SMB share name' $ShareName
-  $HostName = Read-WithDefault 'Host display name' $HostName
-  $HostId = Read-WithDefault 'Host identifier' $HostId
-
-  $permissionMode = Read-WithDefault 'Permission mode (user/everyone)' 'everyone'
-  if ($permissionMode.ToLowerInvariant() -eq 'everyone') {
-    $UseEveryone = $true
-  } else {
-    $UseEveryone = $false
-    $BridgeUser = Read-WithDefault 'Bridge local user' $BridgeUser
-    $BridgePassword = Read-WithDefault 'Bridge local user password' $BridgePassword
-  }
-}
-
-Assert-Admin
-
-if (-not (Test-Path -Path $WindowsProjectRoot)) {
-  throw "Shared root does not exist: $WindowsProjectRoot"
-}
-
-if (-not (Test-Path -Path $ProjectPath)) {
-  throw "Project path does not exist: $ProjectPath"
-}
-
-if ($EnableRemoteDesktop -and -not (Test-RdpHostSupport)) {
-  Write-Warning 'This Windows edition does not support hosting Remote Desktop (RDP). Skipping RDP; share and file access will still be configured.'
-  $EnableRemoteDesktop = $false
-}
-
-$shareAccount = 'Everyone'
-$ntfsAccount = 'Everyone'
-
-if (-not $UseEveryone) {
-  Ensure-LocalUser -UserName $BridgeUser -Password $BridgePassword
-  $shareAccount = $BridgeUser
-  $ntfsAccount = ('{0}\{1}' -f $env:COMPUTERNAME, $BridgeUser)
-}
-
-Ensure-Share -Share $ShareName -RootPath $WindowsProjectRoot -Account $shareAccount
-Ensure-NtfsAccess -RootPath $WindowsProjectRoot -Account $ntfsAccount
-Enable-FileSharingFirewall
-
-if ([string]::IsNullOrWhiteSpace($RemoteUsername)) {
-  if (-not $UseEveryone) {
-    $RemoteUsername = ('{0}\{1}' -f $env:COMPUTERNAME, $BridgeUser)
-  } else {
-    $RemoteUsername = ('{0}\{1}' -f $env:COMPUTERNAME, $env:USERNAME)
-  }
-}
-
-if ($EnableRemoteDesktop) {
-  Enable-RemoteDesktopAccess
-  if (-not $UseEveryone) {
-    Ensure-RemoteDesktopUser -Account $BridgeUser
-  } else {
-    Ensure-RemoteDesktopUser -Account $env:USERNAME
-  }
-}
+Write-Host 'Bridge — Windows one-time setup' -ForegroundColor Cyan
+Write-Host ''
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot = Resolve-Path (Join-Path $scriptDir '..')
-$configPath = Join-Path $repoRoot 'bridge.windows.json'
+$repoRoot = (Resolve-Path (Join-Path $scriptDir '..')).Path
 
+# One question: which folder to share. Default = current directory (or repo root when run from repo).
+$defaultPath = $repoRoot
+if ($Quick -or [string]::IsNullOrWhiteSpace($ProjectPath)) {
+  if ($Quick) {
+    $ProjectPath = $defaultPath
+  } else {
+    Write-Host 'Which folder should Bridge share with your Mac?'
+    Write-Host '(This is usually your project or code folder.)'
+    Write-Host ''
+    $ProjectPath = Read-WithDefault 'Folder path' $defaultPath
+  }
+}
+
+$ProjectPath = $ProjectPath.Trim().TrimEnd('\')
+$WindowsProjectRoot = $ProjectPath
+Assert-Admin
+
+if (-not (Test-Path -LiteralPath $ProjectPath)) {
+  throw "Folder does not exist: $ProjectPath"
+}
+
+Ensure-Share -Share $ShareName -RootPath $WindowsProjectRoot -Account 'Everyone'
+Ensure-NtfsAccess -RootPath $WindowsProjectRoot -Account 'Everyone'
+Enable-FileSharingFirewall
+
+$configPath = Join-Path $repoRoot 'bridge.windows.json'
 Write-WindowsConfig `
   -TargetPath $configPath `
   -Project $ProjectPath `
   -WindowsRoot $WindowsProjectRoot `
   -Share $ShareName `
-  -Host $HostName `
-  -HostIdentifier $HostId `
-  -RemoteControlEnabled $EnableRemoteDesktop `
-  -RemoteControlProtocol $RemoteProtocol `
-  -RemoteControlPort $RemotePort `
-  -RemoteControlUsername $RemoteUsername
+  -HostName $env:COMPUTERNAME `
+  -HostIdentifier $env:COMPUTERNAME
 
-$ipAddress = Try-GetIPv4
-
-Write-Host ''
-Write-Host "Wrote $configPath" -ForegroundColor Green
-Write-Host "Share ready: \\$env:COMPUTERNAME\$ShareName" -ForegroundColor Green
-if ($ipAddress) {
-  Write-Host "Use from Mac: smb://$ipAddress/$ShareName" -ForegroundColor Green
-} else {
-  Write-Host "Use from Mac: smb://$env:COMPUTERNAME/$ShareName" -ForegroundColor Yellow
-}
-
-if (-not $UseEveryone) {
-  Write-Host "SMB user: $env:COMPUTERNAME\$BridgeUser" -ForegroundColor Green
-  Write-Host "SMB password: $BridgePassword" -ForegroundColor Green
-}
-
-if ($EnableRemoteDesktop) {
-  if ($ipAddress) {
-    Write-Host ('Remote control target: {0}:{1} (RDP)' -f $ipAddress, $RemotePort) -ForegroundColor Green
-  } else {
-    Write-Host ('Remote control target: {0}:{1} (RDP)' -f $env:COMPUTERNAME, $RemotePort) -ForegroundColor Green
-  }
-  Write-Host "Remote login user: $RemoteUsername" -ForegroundColor Green
-}
+$ip = $null
+try {
+  $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '169.254*' -and $_.IPAddress -ne '127.0.0.1' } | Select-Object -First 1).IPAddress
+} catch { }
 
 Write-Host ''
-Write-Host 'Next start command:' -ForegroundColor Cyan
-Write-Host '  npm run start:windows'
+Write-Host 'Setup complete.' -ForegroundColor Green
+Write-Host ''
+Write-Host "Shared folder: \\$env:COMPUTERNAME\$ShareName"
+if ($ip) { Write-Host "From Mac: smb://$ip/$ShareName" }
+Write-Host ''
+Write-Host 'Start Bridge:  npm run start:windows' -ForegroundColor Cyan
+Write-Host ''

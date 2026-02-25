@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import {
   BridgeWebSocketServer,
   CommandCancelRequest,
@@ -9,6 +10,7 @@ import {
   Logger,
   MdnsPublisher,
   ProjectFileWatcher,
+  UiBridgeServer,
   WorkspaceState,
   WorkspaceStateManager,
 } from '@bridge/shared';
@@ -51,8 +53,38 @@ async function main(): Promise<void> {
 
   await ensureAutoStartPrepared(logger);
 
+  let paused = false;
+
   const wsServer = new BridgeWebSocketServer(logger);
   wsServer.start(config.wsPort);
+
+  const uiBridge = new UiBridgeServer(logger, {
+    connectionStatus: 'DISCONNECTED',
+    hostDevice: config.hostName,
+    activeProject: initialState.projectName,
+    projectPath: config.projectPath,
+    lastEvent: initialState.lastEvent,
+    macConnected: 0,
+  });
+  uiBridge.start(config.uiBridgePort);
+
+  const syncUiStatus = (): void => {
+    const clientCount = paused ? 0 : wsServer.getClientIds().length;
+    const state = stateManager.getState();
+    const connectionStatus = paused
+      ? 'PAUSED'
+      : clientCount > 0
+        ? 'CONNECTED'
+        : 'DISCONNECTED';
+    uiBridge.updateStatus({
+      connectionStatus,
+      hostDevice: config.hostName,
+      activeProject: state.projectName || null,
+      projectPath: state.projectPath || null,
+      lastEvent: state.lastEvent,
+      macConnected: clientCount,
+    });
+  };
 
   const commandExecutor = new WindowsCommandExecutor(logger, wsServer, {
     projectPath: config.projectPath,
@@ -87,6 +119,7 @@ async function main(): Promise<void> {
 
   wsServer.on('clientsChanged', (_count) => {
     void updateConnectionSnapshot();
+    syncUiStatus();
   });
 
   wsServer.on('clientDisconnected', (clientId) => {
@@ -150,8 +183,49 @@ async function main(): Promise<void> {
   });
 
   stateManager.on('changed', (state) => {
-    wsServer.broadcast(createEnvelope('workspace:state', state));
+    if (!paused) {
+      wsServer.broadcast(createEnvelope('workspace:state', state));
+    }
+    syncUiStatus();
   });
+
+  uiBridge.on('action', (payload) => {
+    const action = payload.action;
+    if (action === 'pause') {
+      paused = true;
+      wsServer.stop();
+      syncUiStatus();
+      logger.info('Bridge paused by user');
+      return;
+    }
+    if (action === 'resume') {
+      paused = false;
+      wsServer.start(config.wsPort);
+      syncUiStatus();
+      logger.info('Bridge resumed by user');
+      return;
+    }
+    if (action === 'open-project') {
+      try {
+        spawn('explorer', [config.projectPath], { stdio: 'ignore' });
+      } catch (err) {
+        logger.warn('Failed to open project folder', { error: (err as Error).message });
+      }
+      return;
+    }
+    if (action === 'restart-host') {
+      logger.info('Restarting Bridge host');
+      const entry = path.join(__dirname, 'index.js');
+      spawn(process.execPath, [entry], {
+        detached: true,
+        stdio: 'ignore',
+        cwd: process.cwd(),
+      });
+      process.exit(0);
+    }
+  });
+
+  syncUiStatus();
 
   const publisher = new MdnsPublisher(logger);
   publisher.start({
@@ -246,6 +320,7 @@ async function main(): Promise<void> {
     await fileWatcher.stop();
     publisher.stop();
     wsServer.stop();
+    uiBridge.stop();
     logger.info('Windows agent stopped');
     process.exit(0);
   };

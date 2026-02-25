@@ -126,6 +126,8 @@ export interface UiStatusSnapshot {
   pairedHostId?: string | null;
   pairedHostName?: string | null;
   discoveredHosts?: UiDiscoveredHost[];
+  /** When running as Windows host: number of connected Mac clients */
+  macConnected?: number;
 }
 
 export interface UiDiscoveredHost {
@@ -148,7 +150,8 @@ export type UiActionType =
   | 'pair-host'
   | 'clear-paired-host'
   | 'run-windows-command'
-  | 'cancel-windows-command';
+  | 'cancel-windows-command'
+  | 'restart-host';
 
 export interface UiActionPayload {
   action: UiActionType;

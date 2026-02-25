@@ -4,6 +4,7 @@ import path from 'node:path';
 
 interface WindowsConfigFile {
   wsPort?: number;
+  uiBridgePort?: number;
   discoveryType?: string;
   projectPath?: string;
   sharedWindowsRoot?: string;
@@ -26,6 +27,7 @@ interface WindowsConfigFile {
 
 export interface WindowsAgentConfig {
   wsPort: number;
+  uiBridgePort: number;
   discoveryType: string;
   projectPath: string;
   sharedWindowsRoot: string;
@@ -188,6 +190,10 @@ export function loadWindowsAgentConfig(): WindowsAgentConfig {
       process.env.BRIDGE_WS_PORT !== undefined
         ? toNumber(process.env.BRIDGE_WS_PORT, 47831)
         : toNumberFromUnknown(fileConfig.wsPort, 47831),
+    uiBridgePort:
+      process.env.BRIDGE_UI_BRIDGE_PORT !== undefined
+        ? toNumber(process.env.BRIDGE_UI_BRIDGE_PORT, 47833)
+        : toNumberFromUnknown(fileConfig.uiBridgePort, 47833),
     discoveryType:
       process.env.BRIDGE_DISCOVERY_TYPE ??
       fileConfig.discoveryType ??

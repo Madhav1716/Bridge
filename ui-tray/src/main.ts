@@ -2,7 +2,9 @@ import { app, Menu, Tray, nativeImage } from 'electron';
 import { Logger, UiBridgeClient, UiStatusSnapshot } from '@bridge/shared';
 
 const logger = new Logger('ui-tray');
-const uiBridgePort = Number(process.env.BRIDGE_UI_BRIDGE_PORT ?? 47832);
+const isWindowsHost = process.platform === 'win32';
+const defaultPort = isWindowsHost ? 47833 : 47832;
+const uiBridgePort = Number(process.env.BRIDGE_UI_BRIDGE_PORT ?? defaultPort);
 
 let tray: Tray | null = null;
 const uiClient = new UiBridgeClient(logger);
@@ -13,14 +15,6 @@ let status: UiStatusSnapshot = {
   activeProject: null,
   projectPath: null,
   lastEvent: null,
-  commandState: 'idle',
-  activeCommand: null,
-  activeCommandRequestId: null,
-  commandExitCode: null,
-  lastCommandAt: null,
-  pairedHostId: null,
-  pairedHostName: null,
-  discoveredHosts: [],
 };
 
 function createTrayIcon() {
@@ -67,156 +61,73 @@ function getLifecycleLabel(connectionStatus: UiStatusSnapshot['connectionStatus'
   }
 }
 
-function getCommandStatusLabel(snapshot: UiStatusSnapshot): string {
-  const commandState = snapshot.commandState ?? 'idle';
-  const command = snapshot.activeCommand ?? 'No command';
-
-  if (commandState === 'running') {
-    return `Command: Running (${command})`;
+/** Windows host: same icons, but DISCONNECTED = "Hosting" (waiting for Mac) */
+function getLifecycleLabelForHost(connectionStatus: UiStatusSnapshot['connectionStatus']): {
+  icon: string;
+  text: string;
+} {
+  switch (connectionStatus) {
+    case 'CONNECTED':
+      return { icon: '🟢', text: 'Connected' };
+    case 'PAUSED':
+      return { icon: '⏸', text: 'Paused' };
+    case 'DISCONNECTED':
+    default:
+      return { icon: '🟢', text: 'Hosting' };
   }
-
-  if (commandState === 'succeeded') {
-    return `Command: Succeeded (${command})`;
-  }
-
-  if (commandState === 'failed') {
-    const exitCode = snapshot.commandExitCode;
-    return exitCode === null || exitCode === undefined
-      ? `Command: Failed (${command})`
-      : `Command: Failed (${command}, exit ${exitCode})`;
-  }
-
-  if (commandState === 'cancelled') {
-    return `Command: Cancelled (${command})`;
-  }
-
-  return 'Command: Idle';
 }
 
-function buildMenu(): Electron.Menu {
+function buildMacMenu(): Electron.Menu {
   const lifecycle = getLifecycleLabel(status.connectionStatus);
-  const pauseAction =
-    status.connectionStatus === 'PAUSED'
-      ? { label: 'Resume', action: 'resume' as const }
-      : { label: 'Pause', action: 'pause' as const };
-  const commandRunning = status.commandState === 'running';
-  const discoveredHosts = status.discoveredHosts ?? [];
-  const pairedHostLabel = status.pairedHostName ?? status.pairedHostId ?? 'None';
-
-  const deviceItems: Electron.MenuItemConstructorOptions[] =
-    discoveredHosts.length === 0
-      ? [
-          {
-            label: 'No Windows hosts found',
-            enabled: false,
-          },
-        ]
-      : discoveredHosts.map((host) => {
-          const prefix = host.isConnected ? '🟢' : host.isPaired ? '⭐' : '⚪';
-          return {
-            label: `${prefix} ${host.hostName} (${host.address})`,
-            click: () => {
-              uiClient.sendAction('pair-host', host.hostId);
-            },
-          };
-        });
+  const isPaused = status.connectionStatus === 'PAUSED';
 
   const template: Electron.MenuItemConstructorOptions[] = [
+    { label: `${lifecycle.icon} ${lifecycle.text}`, enabled: false },
+    { label: `Host: ${status.hostDevice ?? 'Not connected'}`, enabled: false },
+    { label: `Project: ${status.activeProject ?? 'No project'}`, enabled: false },
+    { label: `Last Update: ${formatLastUpdate(status.lastEvent)}`, enabled: false },
+    { type: 'separator' },
+    { label: 'Resume Workspace', click: () => uiClient.sendAction('resume-workspace') },
+    { label: 'Open Project Folder', click: () => uiClient.sendAction('open-project') },
+    { type: 'separator' },
     {
-      label: `${lifecycle.icon} ${lifecycle.text}`,
-      enabled: false,
+      label: isPaused ? 'Resume' : 'Pause',
+      click: () => uiClient.sendAction(isPaused ? 'resume' : 'pause'),
     },
-    {
-      label: `Host: ${status.hostDevice ?? 'Not connected'}`,
-      enabled: false,
-    },
-    {
-      label: `Project: ${status.activeProject ?? 'No project'}`,
-      enabled: false,
-    },
-    {
-      label: `Last Update: ${formatLastUpdate(status.lastEvent)}`,
-      enabled: false,
-    },
-    {
-      label: getCommandStatusLabel(status),
-      enabled: false,
-    },
-    {
-      type: 'separator',
-    },
-    {
-      label: `Paired Host: ${pairedHostLabel}`,
-      enabled: false,
-    },
-    {
-      label: 'Forget Paired Host',
-      enabled: Boolean(status.pairedHostId),
-      click: () => {
-        uiClient.sendAction('clear-paired-host');
-      },
-    },
-    ...deviceItems,
-    {
-      type: 'separator',
-    },
-    {
-      label: 'Resume Workspace',
-      click: () => {
-        uiClient.sendAction('resume-workspace');
-      },
-    },
-    {
-      label: 'Open Project Folder',
-      click: () => {
-        uiClient.sendAction('open-project');
-      },
-    },
-    {
-      label: 'Control Windows (Remote)',
-      enabled: status.connectionStatus === 'CONNECTED',
-      click: () => {
-        uiClient.sendAction('open-remote-control');
-      },
-    },
-    {
-      label: 'Reconnect',
-      click: () => {
-        uiClient.sendAction('reconnect');
-      },
-    },
-    {
-      label: pauseAction.label,
-      click: () => {
-        uiClient.sendAction(pauseAction.action);
-      },
-    },
-    {
-      label: 'Run Windows Command',
-      enabled: status.connectionStatus === 'CONNECTED' && !commandRunning,
-      click: () => {
-        uiClient.sendAction('run-windows-command');
-      },
-    },
-    {
-      label: 'Cancel Windows Command',
-      enabled: commandRunning,
-      click: () => {
-        uiClient.sendAction('cancel-windows-command');
-      },
-    },
-    {
-      type: 'separator',
-    },
-    {
-      label: 'Quit Bridge Tray',
-      click: () => {
-        app.quit();
-      },
-    },
+    { label: 'Reconnect', click: () => uiClient.sendAction('reconnect') },
+    { type: 'separator' },
+    { label: 'Quit Bridge', click: () => app.quit() },
   ];
 
   return Menu.buildFromTemplate(template);
+}
+
+function buildWindowsMenu(): Electron.Menu {
+  const lifecycle = getLifecycleLabelForHost(status.connectionStatus);
+  const isPaused = status.connectionStatus === 'PAUSED';
+  const macCount = status.macConnected ?? 0;
+  const macConnectedLabel = macCount > 0 ? `Yes (${macCount})` : 'No';
+
+  const template: Electron.MenuItemConstructorOptions[] = [
+    { label: `Status: ${lifecycle.icon} ${lifecycle.text}`, enabled: false },
+    { label: `Project: ${status.activeProject ?? 'No project'}`, enabled: false },
+    { label: `Mac Connected: ${macConnectedLabel}`, enabled: false },
+    { type: 'separator' },
+    {
+      label: isPaused ? 'Resume Bridge' : 'Pause Bridge',
+      click: () => uiClient.sendAction(isPaused ? 'resume' : 'pause'),
+    },
+    { label: 'Restart Host', click: () => uiClient.sendAction('restart-host') },
+    { label: 'Open Project Folder', click: () => uiClient.sendAction('open-project') },
+    { type: 'separator' },
+    { label: 'Quit Bridge', click: () => app.quit() },
+  ];
+
+  return Menu.buildFromTemplate(template);
+}
+
+function buildMenu(): Electron.Menu {
+  return isWindowsHost ? buildWindowsMenu() : buildMacMenu();
 }
 
 function refreshTrayMenu(): void {
@@ -224,11 +135,14 @@ function refreshTrayMenu(): void {
     return;
   }
 
-  const lifecycle = getLifecycleLabel(status.connectionStatus);
+  const lifecycle = isWindowsHost
+    ? getLifecycleLabelForHost(status.connectionStatus)
+    : getLifecycleLabel(status.connectionStatus);
+
   tray.setContextMenu(buildMenu());
   tray.setTitle(`Bridge ${lifecycle.icon}`);
   tray.setToolTip(
-    `Bridge · ${lifecycle.text} · ${status.activeProject ?? 'No active project'}`,
+    `Bridge · ${lifecycle.text} · ${status.activeProject ?? (isWindowsHost ? 'Hosting' : 'No active project')}`,
   );
 }
 
@@ -250,7 +164,7 @@ async function bootstrap(): Promise<void> {
 
   uiClient.connect(uiBridgePort);
 
-  logger.info('Tray UI started', { uiBridgePort });
+  logger.info('Tray UI started', { uiBridgePort, isWindowsHost });
 }
 
 process.on('uncaughtException', (error) => {
