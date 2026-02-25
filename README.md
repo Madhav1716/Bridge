@@ -151,16 +151,16 @@ npm run build
 
 ### On Windows (run once as Administrator)
 
-1. Open PowerShell **as Administrator** (right-click → Run as administrator).
+1. Open PowerShell **as Administrator** (right-click, Run as administrator).
 2. Go to the Bridge repo:
    ```powershell
    cd D:\Bridge\Bridge
    ```
-3. Run setup. You’ll get **one question**: which folder to share with Mac (default is the Bridge folder; press Enter, or type e.g. `D:\MyProject`):
+3. Run setup — fully automatic, no prompts:
    ```powershell
    npm run setup:windows
    ```
-   Or skip the question and use the current folder: `npm run setup:windows:quick`
+   Bridge detects all drives and shares them so Mac can access any folder.
 4. Start Bridge: `npm run start:windows`  
    To run the agent and the system-tray icon together: `npm run start:windows:all`. The tray shows status (Hosting / Connected / Paused), project, Mac connected, and quick actions (Pause, Restart, Open Project Folder)—same mental model as the Mac tray.
 

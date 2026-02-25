@@ -22,39 +22,64 @@ import {
 import { openRemoteControlSession } from './remoteControl';
 import { PairingStore } from './pairingStore';
 
-function deriveAutoMapping(
-  service: BridgeServiceRecord | null,
-): { windowsRoot: string; smbRoot: string } | undefined {
-  if (!service) {
-    return undefined;
+interface DerivedMappings {
+  primary?: { windowsRoot: string; smbRoot: string };
+  all: { windowsRoot: string; smbRoot: string }[];
+  primaryMountRoot?: string;
+}
+
+function parseSharesField(
+  sharesRaw: string | undefined,
+  host: string,
+): { windowsRoot: string; smbRoot: string }[] {
+  if (!sharesRaw || !sharesRaw.trim()) {
+    return [];
   }
+
+  return sharesRaw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .map((entry) => {
+      const colonIdx = entry.indexOf(':');
+      if (colonIdx < 1) {
+        return null;
+      }
+      const driveLetter = entry.substring(0, colonIdx).toUpperCase();
+      const shareName = entry.substring(colonIdx + 1);
+      if (!shareName) {
+        return null;
+      }
+      return {
+        windowsRoot: `${driveLetter}:\\`,
+        smbRoot: `smb://${host}/${encodeURIComponent(shareName)}`,
+      };
+    })
+    .filter((m): m is { windowsRoot: string; smbRoot: string } => m !== null);
+}
+
+function deriveMappings(service: BridgeServiceRecord | null): DerivedMappings {
+  const empty: DerivedMappings = { all: [] };
+  if (!service) {
+    return empty;
+  }
+
+  const allFromShares = parseSharesField(service.txt.shares, service.host);
 
   const shareName = service.txt.shareName?.trim();
   const windowsRoot = service.txt.windowsRoot?.trim();
-  if (!shareName || !windowsRoot) {
-    return undefined;
+  let primary: { windowsRoot: string; smbRoot: string } | undefined;
+  if (shareName && windowsRoot) {
+    primary = {
+      windowsRoot,
+      smbRoot: `smb://${service.host}/${encodeURIComponent(shareName)}`,
+    };
   }
 
-  const encodedShareName = encodeURIComponent(shareName);
-  const smbRoot = `smb://${service.host}/${encodedShareName}`;
+  const all = allFromShares.length > 0 ? allFromShares : primary ? [primary] : [];
+  const primaryMountRoot = shareName ? `/Volumes/${shareName}` : undefined;
 
-  return {
-    windowsRoot,
-    smbRoot,
-  };
-}
-
-function deriveAutoMountRoot(service: BridgeServiceRecord | null): string | undefined {
-  if (!service) {
-    return undefined;
-  }
-
-  const shareName = service.txt.shareName?.trim();
-  if (!shareName) {
-    return undefined;
-  }
-
-  return `/Volumes/${shareName}`;
+  return { primary, all, primaryMountRoot };
 }
 
 async function main(): Promise<void> {
@@ -432,10 +457,9 @@ async function main(): Promise<void> {
           return;
         }
 
-        const dynamicMapping =
-          config.pathMapping ?? deriveAutoMapping(selectedService);
-        const dynamicMountRoot =
-          config.smbMountRoot ?? deriveAutoMountRoot(selectedService);
+        const derived = deriveMappings(selectedService);
+        const dynamicMapping = config.pathMapping ?? derived.primary;
+        const dynamicMountRoot = config.smbMountRoot ?? derived.primaryMountRoot;
 
         await handleUiAction(
           logger,
@@ -446,6 +470,7 @@ async function main(): Promise<void> {
           connectToSelectedService,
           {
             mapping: dynamicMapping,
+            allMappings: derived.all,
             smbMountRoot: dynamicMountRoot,
             mountTimeoutMs: config.smbMountTimeoutMs,
           },

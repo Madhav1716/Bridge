@@ -13,6 +13,7 @@ import {
 
 export interface ResumeAccessOptions {
   mapping?: PathMappingOptions;
+  allMappings?: PathMappingOptions[];
   smbMountRoot?: string;
   mountTimeoutMs?: number;
 }
@@ -75,24 +76,6 @@ function parseSmbRoot(smbRoot: string): ParsedSmbRoot | null {
   }
 }
 
-function deriveMountRoot(accessOptions: ResumeAccessOptions): string | null {
-  if (accessOptions.smbMountRoot) {
-    return accessOptions.smbMountRoot;
-  }
-
-  const smbRoot = accessOptions.mapping?.smbRoot;
-  if (!smbRoot) {
-    return null;
-  }
-
-  const parsedRoot = parseSmbRoot(smbRoot);
-  if (!parsedRoot) {
-    return null;
-  }
-
-  return path.join('/Volumes', parsedRoot.shareName);
-}
-
 function toWindowsSegments(value: string): string[] {
   return value
     .replace(/\//g, '\\')
@@ -101,15 +84,10 @@ function toWindowsSegments(value: string): string[] {
     .filter((segment) => segment.length > 0);
 }
 
-function mapWindowsPathToMountedPath(
+function tryMapWithMapping(
   windowsPath: string,
-  accessOptions: ResumeAccessOptions,
+  mapping: PathMappingOptions,
 ): string | null {
-  const mapping = accessOptions.mapping;
-  if (!mapping) {
-    return null;
-  }
-
   const sourceSegments = toWindowsSegments(windowsPath);
   const rootSegments = toWindowsSegments(mapping.windowsRoot);
   if (rootSegments.length === 0 || sourceSegments.length < rootSegments.length) {
@@ -123,14 +101,32 @@ function mapWindowsPathToMountedPath(
   }
 
   const smbParsed = parseSmbRoot(mapping.smbRoot);
-  const mountRoot = deriveMountRoot(accessOptions);
-  if (!smbParsed || !mountRoot) {
+  if (!smbParsed) {
     return null;
   }
 
+  const mountRoot = path.join('/Volumes', smbParsed.shareName);
   const relativeSegments = sourceSegments.slice(rootSegments.length);
-
   return path.join(mountRoot, ...smbParsed.shareSubPath, ...relativeSegments);
+}
+
+function mapWindowsPathToMountedPath(
+  windowsPath: string,
+  accessOptions: ResumeAccessOptions,
+): string | null {
+  const candidates = accessOptions.allMappings ?? [];
+  if (accessOptions.mapping) {
+    candidates.unshift(accessOptions.mapping);
+  }
+
+  for (const mapping of candidates) {
+    const result = tryMapWithMapping(windowsPath, mapping);
+    if (result) {
+      return result;
+    }
+  }
+
+  return null;
 }
 
 async function pathExists(target: string): Promise<boolean> {
@@ -158,16 +154,24 @@ async function waitForPath(target: string, timeoutMs: number): Promise<boolean> 
   return false;
 }
 
-async function ensureShareMounted(
+function mountRootForMapping(mapping: PathMappingOptions): string | null {
+  const parsed = parseSmbRoot(mapping.smbRoot);
+  if (!parsed) {
+    return null;
+  }
+  return path.join('/Volumes', parsed.shareName);
+}
+
+async function mountSingleShare(
   logger: Logger,
-  accessOptions: ResumeAccessOptions,
+  mapping: PathMappingOptions,
+  timeoutMs: number,
 ): Promise<void> {
-  const mapping = accessOptions.mapping;
-  if (!mapping || !mapping.smbRoot.startsWith('smb://')) {
+  if (!mapping.smbRoot.startsWith('smb://')) {
     return;
   }
 
-  const mountRoot = deriveMountRoot(accessOptions);
+  const mountRoot = mountRootForMapping(mapping);
   if (!mountRoot) {
     return;
   }
@@ -192,15 +196,60 @@ async function ensureShareMounted(
     return;
   }
 
-  const mountTimeoutMs = accessOptions.mountTimeoutMs ?? DEFAULT_MOUNT_TIMEOUT_MS;
-  const mounted = await waitForPath(mountRoot, mountTimeoutMs);
-
+  const mounted = await waitForPath(mountRoot, timeoutMs);
   if (!mounted) {
     logger.warn('SMB share was not confirmed as mounted before timeout', {
       mountRoot,
-      timeoutMs: mountTimeoutMs,
+      timeoutMs,
     });
   }
+}
+
+async function ensureShareMounted(
+  logger: Logger,
+  accessOptions: ResumeAccessOptions,
+): Promise<void> {
+  const timeoutMs = accessOptions.mountTimeoutMs ?? DEFAULT_MOUNT_TIMEOUT_MS;
+
+  const mappingsToMount: PathMappingOptions[] = [];
+  if (accessOptions.allMappings && accessOptions.allMappings.length > 0) {
+    mappingsToMount.push(...accessOptions.allMappings);
+  } else if (accessOptions.mapping) {
+    mappingsToMount.push(accessOptions.mapping);
+  }
+
+  for (const mapping of mappingsToMount) {
+    await mountSingleShare(logger, mapping, timeoutMs);
+  }
+}
+
+function findMatchingMapping(
+  rawWindowsPath: string,
+  accessOptions: ResumeAccessOptions,
+): PathMappingOptions | undefined {
+  const allMappings = accessOptions.allMappings ?? [];
+  const primary = accessOptions.mapping;
+  const candidates = primary ? [primary, ...allMappings] : allMappings;
+
+  for (const mapping of candidates) {
+    const segments = toWindowsSegments(rawWindowsPath);
+    const rootSegments = toWindowsSegments(mapping.windowsRoot);
+    if (rootSegments.length === 0 || segments.length < rootSegments.length) {
+      continue;
+    }
+    let match = true;
+    for (let i = 0; i < rootSegments.length; i += 1) {
+      if (segments[i].toLowerCase() !== rootSegments[i].toLowerCase()) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      return mapping;
+    }
+  }
+
+  return primary;
 }
 
 async function resolveOpenCandidates(
@@ -214,7 +263,8 @@ async function resolveOpenCandidates(
     candidates.push(mountedPath);
   }
 
-  const mappedPath = mapPath(rawWindowsPath, accessOptions.mapping);
+  const bestMapping = findMatchingMapping(rawWindowsPath, accessOptions);
+  const mappedPath = mapPath(rawWindowsPath, bestMapping);
   candidates.push(mappedPath);
 
   if (mountedPath && !candidates.includes(mountedPath)) {
@@ -301,10 +351,10 @@ export async function openProjectFolder(
     return false;
   }
 
-  if (
-    !accessOptions.mapping &&
-    isWindowsPath(workspaceState.projectPath)
-  ) {
+  const hasMapping = Boolean(accessOptions.mapping) ||
+    (accessOptions.allMappings && accessOptions.allMappings.length > 0);
+
+  if (!hasMapping && isWindowsPath(workspaceState.projectPath)) {
     logger.warn(
       'Open project requires Windows-to-SMB mapping (set BRIDGE_WINDOWS_PROJECT_ROOT and BRIDGE_SMB_ROOT)',
       { projectPath: workspaceState.projectPath },
@@ -337,10 +387,10 @@ export async function resumeWorkspace(
     return false;
   }
 
-  if (
-    !accessOptions.mapping &&
-    isWindowsPath(workspaceState.projectPath)
-  ) {
+  const hasMapping = Boolean(accessOptions.mapping) ||
+    (accessOptions.allMappings && accessOptions.allMappings.length > 0);
+
+  if (!hasMapping && isWindowsPath(workspaceState.projectPath)) {
     logger.warn(
       'Resume workspace requires Windows-to-SMB mapping (set BRIDGE_WINDOWS_PROJECT_ROOT and BRIDGE_SMB_ROOT)',
       { projectPath: workspaceState.projectPath },

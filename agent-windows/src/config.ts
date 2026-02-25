@@ -10,6 +10,7 @@ interface WindowsConfigFile {
   sharedWindowsRoot?: string;
   windowsProjectRoot?: string;
   shareName?: string;
+  shares?: string;
   remoteControlEnabled?: boolean | string;
   remoteProtocol?: string;
   remotePort?: number | string;
@@ -32,6 +33,7 @@ export interface WindowsAgentConfig {
   projectPath: string;
   sharedWindowsRoot: string;
   shareName?: string;
+  shares: string;
   remoteControlEnabled: boolean;
   remoteProtocol: 'rdp';
   remotePort: number;
@@ -143,7 +145,7 @@ export function loadWindowsAgentConfig(): WindowsAgentConfig {
   const fileConfig = loadWindowsConfigFile();
 
   const projectPath =
-    process.env.BRIDGE_PROJECT_PATH ?? fileConfig.projectPath ?? process.cwd();
+    process.env.BRIDGE_PROJECT_PATH ?? fileConfig.projectPath ?? os.homedir();
   const sharedWindowsRoot =
     process.env.BRIDGE_WINDOWS_PROJECT_ROOT ??
     fileConfig.windowsProjectRoot ??
@@ -201,6 +203,7 @@ export function loadWindowsAgentConfig(): WindowsAgentConfig {
     projectPath,
     sharedWindowsRoot,
     shareName: process.env.BRIDGE_SHARE_NAME ?? fileConfig.shareName,
+    shares: process.env.BRIDGE_SHARES ?? fileConfig.shares ?? '',
     remoteControlEnabled,
     remoteProtocol,
     remotePort,

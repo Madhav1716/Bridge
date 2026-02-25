@@ -1,18 +1,9 @@
 param(
-  [string]$ProjectPath = '',
-  [string]$ShareName = 'BridgeShare',
   [switch]$Quick
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-function Read-WithDefault {
-  param([string]$Prompt, [string]$DefaultValue)
-  $inputValue = Read-Host "$Prompt [$DefaultValue]"
-  if ([string]::IsNullOrWhiteSpace($inputValue)) { return $DefaultValue }
-  return $inputValue.Trim()
-}
 
 function Test-IsAdmin {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -21,20 +12,15 @@ function Test-IsAdmin {
 }
 
 function Assert-Admin {
-  if (-not (Test-IsAdmin)) { throw 'Run this script as Administrator (right-click, Run as administrator).' }
+  if (-not (Test-IsAdmin)) { throw 'Run this script as Administrator (right-click → Run as administrator).' }
 }
 
 function Assert-ExitCode { param([string]$Step) if ($LASTEXITCODE -ne 0) { throw "$Step failed." } }
 
 function Ensure-Share { param([string]$Share, [string]$RootPath, [string]$Account)
   cmd /c "net share $Share /delete /y >nul 2>&1"
-  cmd /c "net share $Share=`"$RootPath`" /grant:$Account,CHANGE >nul"
+  cmd /c "net share $Share=`"$RootPath`" /grant:$Account,FULL >nul"
   Assert-ExitCode "Creating share $Share"
-}
-
-function Ensure-NtfsAccess { param([string]$RootPath, [string]$Account)
-  & icacls $RootPath /grant "${Account}:(OI)(CI)M" /T /C > $null
-  Assert-ExitCode "Setting permissions"
 }
 
 function Enable-FileSharingFirewall {
@@ -56,52 +42,42 @@ function Enable-RemoteDesktop {
   Assert-ExitCode 'Enabling Remote Desktop firewall rules'
 }
 
-function Write-WindowsConfig { param([string]$TargetPath, [string]$Project, [string]$WindowsRoot, [string]$Share, [string]$HostName, [string]$HostId, [bool]$RemoteControlEnabled)
-  $config = @{
-    projectPath = $Project
-    windowsProjectRoot = $WindowsRoot
-    shareName = $Share
-    hostId = $HostId
-    hostName = $HostName
-    discoveryType = 'bridgeworkspace'
-    remoteControlEnabled = $RemoteControlEnabled
-    remoteProtocol = 'rdp'
-    remotePort = 3389
-    remoteUsername = ''
-    allowedCommands = @('npm', 'pnpm', 'yarn', 'node', 'npx', 'git', 'python', 'pytest', 'dotnet', 'cargo', 'go')
-  } | ConvertTo-Json -Depth 5
-  Set-Content -Path $TargetPath -Value $config -Encoding UTF8
+function Get-FixedDrives {
+  Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3" | Select-Object -ExpandProperty DeviceID | Sort-Object
 }
 
 Write-Host 'Bridge — Windows one-time setup' -ForegroundColor Cyan
 Write-Host ''
 
+Assert-Admin
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptDir '..')).Path
 
-# One question: which folder to share. Default = current directory (or repo root when run from repo).
-$defaultPath = $repoRoot
-if ($Quick -or [string]::IsNullOrWhiteSpace($ProjectPath)) {
-  if ($Quick) {
-    $ProjectPath = $defaultPath
-  } else {
-    Write-Host 'Which folder should Bridge share with your Mac?'
-    Write-Host '(This is usually your project or code folder.)'
-    Write-Host ''
-    $ProjectPath = Read-WithDefault 'Folder path' $defaultPath
+# Auto-detect all fixed drives and share each one. No prompts.
+$drives = @(Get-FixedDrives)
+if ($drives.Count -eq 0) { throw 'No fixed drives found.' }
+
+Write-Host "Detected drives: $($drives -join ', ')"
+
+$shareEntries = @()
+
+foreach ($drive in $drives) {
+  $letter = $drive.Substring(0, 1)
+  $shareName = "Bridge_$letter"
+  $drivePath = "${drive}\"
+
+  Write-Host "  Sharing $drivePath as $shareName ..."
+  try {
+    Ensure-Share -Share $shareName -RootPath $drivePath -Account 'Everyone'
+    $shareEntries += "$letter`:$shareName"
+  } catch {
+    Write-Host "  Warning: could not share $drivePath — skipping." -ForegroundColor Yellow
   }
 }
 
-$ProjectPath = $ProjectPath.Trim().TrimEnd('\')
-$WindowsProjectRoot = $ProjectPath
-Assert-Admin
+if ($shareEntries.Count -eq 0) { throw 'No drives could be shared.' }
 
-if (-not (Test-Path -LiteralPath $ProjectPath)) {
-  throw "Folder does not exist: $ProjectPath"
-}
-
-Ensure-Share -Share $ShareName -RootPath $WindowsProjectRoot -Account 'Everyone'
-Ensure-NtfsAccess -RootPath $WindowsProjectRoot -Account 'Everyone'
 Enable-FileSharingFirewall
 
 $rdpEnabled = $false
@@ -113,18 +89,31 @@ if (Test-RdpHostSupport) {
     Write-Host 'Could not enable Remote Desktop (need Pro/Enterprise for full PC access from Mac).' -ForegroundColor Yellow
   }
 } else {
-  Write-Host 'Windows Home edition: Remote Desktop hosting not available. Use folder share for file access.' -ForegroundColor Yellow
+  Write-Host 'Windows Home edition: Remote Desktop hosting not available.' -ForegroundColor Yellow
 }
 
+# Primary drive = drive where user home lives
+$homeDrive = (Split-Path -Qualifier $env:USERPROFILE).Substring(0, 1)
+$primaryShare = "Bridge_$homeDrive"
+$projectPath = $env:USERPROFILE
+
+$config = @{
+  projectPath        = $projectPath
+  windowsProjectRoot = "${homeDrive}:\"
+  shareName          = $primaryShare
+  shares             = ($shareEntries -join ',')
+  hostId             = $env:COMPUTERNAME
+  hostName           = $env:COMPUTERNAME
+  discoveryType      = 'bridgeworkspace'
+  remoteControlEnabled = $rdpEnabled
+  remoteProtocol     = 'rdp'
+  remotePort         = 3389
+  remoteUsername      = ''
+  allowedCommands    = @('npm', 'pnpm', 'yarn', 'node', 'npx', 'git', 'python', 'pytest', 'dotnet', 'cargo', 'go')
+} | ConvertTo-Json -Depth 5
+
 $configPath = Join-Path $repoRoot 'bridge.windows.json'
-Write-WindowsConfig `
-  -TargetPath $configPath `
-  -Project $ProjectPath `
-  -WindowsRoot $WindowsProjectRoot `
-  -Share $ShareName `
-  -HostName $env:COMPUTERNAME `
-  -HostIdentifier $env:COMPUTERNAME `
-  -RemoteControlEnabled $rdpEnabled
+Set-Content -Path $configPath -Value $config -Encoding UTF8
 
 $ip = $null
 try {
@@ -134,12 +123,16 @@ try {
 Write-Host ''
 Write-Host 'Setup complete.' -ForegroundColor Green
 Write-Host ''
-Write-Host "Shared folder: \\$env:COMPUTERNAME\$ShareName"
-if ($ip) { Write-Host "From Mac: smb://$ip/$ShareName" }
+Write-Host "Shared drives: $($shareEntries -join ', ')"
+if ($ip) {
+  foreach ($entry in $shareEntries) {
+    $parts = $entry -split ':'
+    Write-Host "  $($parts[0]):\ → smb://$ip/$($parts[1])"
+  }
+}
 if ($rdpEnabled) {
   Write-Host ''
-  Write-Host 'Full PC access: From Mac tray, use "Access Windows" to open the full Windows desktop (RDP).' -ForegroundColor Green
-  if ($ip) { Write-Host "RDP: ${ip}:3389" }
+  Write-Host 'Full PC access: use "Access Windows" in the Mac tray (RDP).' -ForegroundColor Green
 }
 Write-Host ''
 Write-Host 'Start Bridge:  npm run start:windows' -ForegroundColor Cyan
