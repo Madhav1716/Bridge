@@ -15,11 +15,13 @@ No cloud, no custom file sync, no dashboard.
 ├── agent-windows
 │   └── src
 │       ├── autostart.ts
+│       ├── commandExecutor.ts
 │       ├── config.ts
 │       └── index.ts
 ├── agent-mac
 │   └── src
 │       ├── autostart.ts
+│       ├── commandRequest.ts
 │       ├── config.ts
 │       ├── index.ts
 │       └── resumeWorkspace.ts
@@ -64,6 +66,7 @@ No cloud, no custom file sync, no dashboard.
 5. Mac Agent stores latest workspace state locally and exposes a local UI bridge socket.
 6. Tray UI connects to the local UI bridge and shows status/actions only.
 7. `Resume Workspace` on Mac opens the shared project path and attempts to open tracked files.
+8. `Run Windows Command` on Mac sends an allowlisted command to Windows and streams lifecycle events.
 
 Connection lifecycle model:
 - `DISCONNECTED`
@@ -125,7 +128,7 @@ Decision:
 
 Includes:
 - Connection/host/project/last-event status
-- Quick actions: reconnect, pause/resume, open project folder, resume workspace
+- Quick actions: reconnect, pause/resume, open project folder, resume workspace, run/cancel Windows command
 
 ## Prerequisites
 
@@ -159,6 +162,10 @@ Optional environment variables:
 - `BRIDGE_HOST_ID` (default hostname, used for stable identity)
 - `BRIDGE_HEARTBEAT_MS` (default `4000`)
 - `BRIDGE_HEARTBEAT_TIMEOUT_MS` (default `12000`)
+- `BRIDGE_SHARE_NAME` (recommended: SMB share name; enables Mac auto-mapping)
+- `BRIDGE_WINDOWS_PROJECT_ROOT` (optional shared root path for mapping; defaults to `BRIDGE_PROJECT_PATH`)
+- `BRIDGE_ALLOWED_COMMANDS` (comma-separated allowlist for remote command execution)
+- `BRIDGE_COMMAND_TIMEOUT_MS` (default `900000`)
 
 ### 2. Start Mac Agent (on Mac machine)
 
@@ -177,6 +184,29 @@ Optional environment variables:
 - `BRIDGE_HEARTBEAT_TIMEOUT_MS` (default `12000`)
 - `BRIDGE_DISCOVERY_STALE_MS` (default `15000`)
 - `BRIDGE_DISCOVERY_SWEEP_MS` (default `4000`)
+- `BRIDGE_SMB_MOUNT_ROOT` (optional, default derived as `/Volumes/<ShareName>`)
+- `BRIDGE_SMB_MOUNT_TIMEOUT_MS` (default `12000`)
+- `BRIDGE_WINDOWS_COMMAND` (command run by tray action; default `npm -v`)
+- `BRIDGE_WINDOWS_COMMAND_CWD` (optional Windows working directory)
+
+### Easier Setup Path (Recommended)
+
+You can avoid manual Mac path-mapping variables by publishing share metadata from Windows.
+
+Windows:
+```bat
+set BRIDGE_PROJECT_PATH=D:\Bridge\Bridge\agent-windows
+set BRIDGE_SHARE_NAME=BridgeShare
+set BRIDGE_WINDOWS_PROJECT_ROOT=D:\Bridge\Bridge
+npm run start:windows
+```
+
+Mac:
+```bash
+npm run start:mac
+```
+
+Bridge will derive SMB mapping from discovery metadata and prompt for SMB login once.
 
 ### 3. Start Tray UI (on Mac machine)
 
@@ -185,12 +215,23 @@ cd /Users/maddy/Development/Bridge
 npm run start:tray
 ```
 
+### 4. Test Windows Command Execution (from Mac tray)
+
+Set the default command on Mac agent before startup:
+
+```bash
+export BRIDGE_WINDOWS_COMMAND='npm -v'
+```
+
+Then in tray:
+- Click `Run Windows Command` to execute on Windows host.
+- Click `Cancel Windows Command` to stop a running command.
+
+The tray status line shows command state (`Idle`, `Running`, `Succeeded`, `Failed`, `Cancelled`).
+
 ## Notes
 
 - This MVP intentionally reconstructs state only; it does not migrate running processes.
 - File sync is intentionally not implemented; use SMB/native sharing.
 - Autostart registration is represented by explicit placeholder hooks in both agents.
-# Bridge
-# Bridge
-# Bridge
 # Bridge
