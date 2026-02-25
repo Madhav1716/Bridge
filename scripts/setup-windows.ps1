@@ -37,73 +37,12 @@ function Test-IsAdmin {
   return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Escape-ArgumentValue {
-  param(
-    [string]$Value
-  )
-
-  return '"' + $Value.Replace('"', '\"') + '"'
-}
-
-function Build-RelaunchArguments {
-  param(
-    [hashtable]$BoundParameters,
-    [string]$ScriptPath
-  )
-
-  $arguments = @(
-    '-NoProfile'
-    '-ExecutionPolicy'
-    'Bypass'
-    '-File'
-    (Escape-ArgumentValue -Value $ScriptPath)
-  )
-
-  foreach ($entry in ($BoundParameters.GetEnumerator() | Sort-Object Key)) {
-    $name = $entry.Key
-    $value = $entry.Value
-
-    if ($value -is [System.Management.Automation.SwitchParameter]) {
-      if ($value.IsPresent) {
-        $arguments += "-$name"
-      }
-      continue
-    }
-
-    if ($value -is [bool]) {
-      if ($value) {
-        $arguments += "-$name:`$true"
-      } else {
-        $arguments += "-$name:`$false"
-      }
-      continue
-    }
-
-    if ($null -eq $value) {
-      continue
-    }
-
-    $arguments += "-$name"
-    $arguments += (Escape-ArgumentValue -Value $value.ToString())
-  }
-
-  return $arguments
-}
-
-function Ensure-Admin {
+function Assert-Admin {
   if (Test-IsAdmin) {
     return
   }
 
-  Write-Host 'Administrator privileges are required. Approve UAC prompt to continue...' -ForegroundColor Yellow
-  $scriptPath = $PSCommandPath
-  $relaunchArgs = Build-RelaunchArguments -BoundParameters $PSBoundParameters -ScriptPath $scriptPath
-  $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $relaunchArgs -Wait -PassThru
-  if ($null -ne $process) {
-    exit $process.ExitCode
-  }
-
-  exit 1
+  throw 'Run setup-windows.ps1 as Administrator.'
 }
 
 function Assert-ExitCode {
@@ -269,7 +208,7 @@ if (-not $NoPrompt) {
   }
 }
 
-Ensure-Admin
+Assert-Admin
 
 if (-not (Test-Path -Path $WindowsProjectRoot)) {
   throw "Shared root does not exist: $WindowsProjectRoot"
@@ -289,7 +228,7 @@ $ntfsAccount = 'Everyone'
 if (-not $UseEveryone) {
   Ensure-LocalUser -UserName $BridgeUser -Password $BridgePassword
   $shareAccount = $BridgeUser
-  $ntfsAccount = "$env:COMPUTERNAME\$BridgeUser"
+  $ntfsAccount = ('{0}\{1}' -f $env:COMPUTERNAME, $BridgeUser)
 }
 
 Ensure-Share -Share $ShareName -RootPath $WindowsProjectRoot -Account $shareAccount
@@ -298,9 +237,9 @@ Enable-FileSharingFirewall
 
 if ([string]::IsNullOrWhiteSpace($RemoteUsername)) {
   if (-not $UseEveryone) {
-    $RemoteUsername = "$env:COMPUTERNAME\$BridgeUser"
+    $RemoteUsername = ('{0}\{1}' -f $env:COMPUTERNAME, $BridgeUser)
   } else {
-    $RemoteUsername = "$env:COMPUTERNAME\$env:USERNAME"
+    $RemoteUsername = ('{0}\{1}' -f $env:COMPUTERNAME, $env:USERNAME)
   }
 }
 
@@ -347,9 +286,9 @@ if (-not $UseEveryone) {
 
 if ($EnableRemoteDesktop) {
   if ($ipAddress) {
-    Write-Host "Remote control target: $ipAddress`:$RemotePort (RDP)" -ForegroundColor Green
+    Write-Host ('Remote control target: {0}:{1} (RDP)' -f $ipAddress, $RemotePort) -ForegroundColor Green
   } else {
-    Write-Host "Remote control target: $env:COMPUTERNAME`:$RemotePort (RDP)" -ForegroundColor Green
+    Write-Host ('Remote control target: {0}:{1} (RDP)' -f $env:COMPUTERNAME, $RemotePort) -ForegroundColor Green
   }
   Write-Host "Remote login user: $RemoteUsername" -ForegroundColor Green
 }
